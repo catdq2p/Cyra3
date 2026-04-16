@@ -75,13 +75,6 @@ RESP_PILL = {
     "—":       "background:#F1EFE8;color:#888780",
 }
 
-TIER_COLORS = {
-    "Critical": "#A32D2D",
-    "High":     "#854F0B",
-    "Medium":   "#185FA5",
-    "Low":      "#3B6D11",
-}
-
 TIER_PILL = {
     "Critical": "background:#FCEBEB;color:#A32D2D",
     "High":     "background:#FAEEDA;color:#854F0B",
@@ -588,7 +581,7 @@ def extract_contact(p1_items: list) -> dict:
 
 
 def make_sample_excel() -> bytes:
-    """Generate a minimal sample Excel matching v3.0 format."""
+    """Generate a minimal sample Excel template matching TPCRA v3.0 format."""
     p2_rows = [
         ("TPCRA Questionnaire - Part 2  |  v3.0  |  Response options: Yes / No / Partial / N/A", None, None, None, None, None),
         ("#", "Statement / Question", "Response\n(Yes/No/Partial/N/A)", "Other Information\n(Remarks & Evidence)", "Risk\nTier", "Comments\nRequired"),
@@ -825,7 +818,6 @@ def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: st
     s_small   = _s("small",   fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   leading=10)
     s_ref     = _s("ref",     fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY)
     s_sec     = _s("sec",     fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY,                   spaceBefore=4,  spaceAfter=2)
-    s_sec2    = _s("sec2",    fontSize=8,  fontName="Helvetica-Bold",   textColor=colors.HexColor("#1a1a2e"), spaceBefore=6, spaceAfter=2)
     s_note    = _s("note",    fontSize=7.5,fontName="Helvetica-Oblique",textColor=C_GRY,                   leading=11)
     s_footer  = _s("footer",  fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   alignment=TA_CENTER)
     s_nist    = _s("nist",    fontSize=6.5,fontName="Helvetica-Oblique",textColor=C_BLU,                   leading=9)
@@ -1168,17 +1160,29 @@ with st.sidebar:
         type=["xlsx", "xls"],
         help="Upload a completed TPCRA v3.0 questionnaire."
     )
+    st.divider()
+    st.download_button(
+        "⬇ Download sample template",
+        data=make_sample_excel(),
+        file_name="TPCRA_v3.0_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Download a minimal TPCRA v3.0 questionnaire template to fill in.",
+        use_container_width=True,
+    )
 
 # ── Empty state ────────────────────────────────────────────────────────────────
 if not uploaded:
     st.title("🔐 TPCRA v3.0 Risk Assessment Dashboard")
     st.markdown("Upload a completed TPCRA v3.0 questionnaire from the sidebar to generate the dashboard.")
     st.divider()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.info("**Overview**\nCompliance score, risk rating, and response distribution across all 14 domains.")
-    c2.info("**By domain**\nDrill into A–N domains with per-question response cards, tier badges, and remarks.")
-    c3.info("**Gap analysis**\nAll No / Partial / unanswered items filtered by risk tier for prioritized remediation.")
-    c4.info("**Evidence & Engagement Info**\nEvidence checklist status and engagement/contact information from questionnaire.")
+    c1, c2, c3 = st.columns(3)
+    c1.info("**Overview**\nCompliance score, risk rating, response distribution, and domain scores across all 14 domains.")
+    c2.info("**By domain**\nDrill into any of the A–N domains with per-question response cards, tier badges, and vendor remarks.")
+    c3.info("**Gap summary**\nAll No / N/A / Partial / unanswered controls grouped by tier, with NIST-grounded recommendations and PDF export.")
+    c4, c5, c6 = st.columns(3)
+    c4.info("**Gap analysis**\nFlat filterable list of every gap item — by tier, response type, and domain — with CSV/Excel export.")
+    c5.info("**Evidence checklist**\nEvidence submission status against the 14 required evidence items from the TPCRA v3.0 checklist.")
+    c6.info("**Engagement info**\nVendor contact details, engagement description, data handling, and transmission methods from Part 1.")
     st.stop()
 
 # ── Load workbook ──────────────────────────────────────────────────────────────
@@ -1239,8 +1243,8 @@ k7.metric("Compliance score",  f"{score}%",
 st.divider()
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_overview, tab_domain, tab_gaps, tab_evidence, tab_part1, tab_gap_summary = st.tabs([
-    "Overview", "By domain", "Gap analysis", "Evidence checklist", "Engagement info", "Gap summary"
+tab_overview, tab_domain, tab_evidence, tab_part1, tab_gap_summary = st.tabs([
+    "Overview", "By domain", "Evidence checklist", "Engagement info", "Gap summary"
 ])
 
 # ══════════════════════════
@@ -1322,34 +1326,6 @@ with tab_overview:
                     f'<div style="width:{row["Score"]}%;height:100%;background:{rc};border-radius:4px"></div>'
                     f'</div></div>', unsafe_allow_html=True,
                 )
-
-    # Risk tier breakdown
-    st.divider()
-    st.subheader("Gaps by risk tier")
-    gaps = [i for i in p2_items if i["norm"] in ("No", "Partial", "—") and i["tier"]]
-    tier_counts = {}
-    for g in gaps:
-        tier_counts[g["tier"]] = tier_counts.get(g["tier"], 0) + 1
-
-    if tier_counts:
-        t_labels = ["Critical", "High", "Medium", "Low"]
-        t_vals   = [tier_counts.get(t, 0) for t in t_labels]
-        t_colors = [TIER_COLORS.get(t, "#888") for t in t_labels]
-        fig_tier = go.Figure(go.Bar(
-            x=t_labels, y=t_vals,
-            marker_color=t_colors,
-            text=t_vals, textposition="outside",
-        ))
-        fig_tier.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0), height=200,
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            showlegend=False, font=dict(size=12),
-            yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.07)"),
-        )
-        st.plotly_chart(fig_tier, use_container_width=True)
-    else:
-        st.info("No gap data with risk tier information found.")
-
 
 # ══════════════════════════
 # TAB 2 — BY DOMAIN
@@ -1439,117 +1415,9 @@ with tab_domain:
                     )
 
 
-# ══════════════════════════
-# TAB 3 — GAP ANALYSIS
-# ══════════════════════════
-with tab_gaps:
-    gaps_all = [i for i in p2_items if i["norm"] in ("No", "Partial", "—")]
-    n_crit = sum(1 for g in gaps_all if g["tier"] == "Critical")
-    n_high = sum(1 for g in gaps_all if g["tier"] == "High")
-    n_med  = sum(1 for g in gaps_all if g["tier"] == "Medium")
-    n_low  = sum(1 for g in gaps_all if g["tier"] == "Low")
-
-    if not gaps_all:
-        st.success("No gaps found — all questions are compliant or marked N/A.")
-    else:
-        g1, g2, g3, g4, g5 = st.columns(5)
-        g1.metric("Total gaps",        len(gaps_all))
-        g2.metric("🔴 Critical tier",  n_crit)
-        g3.metric("🟠 High tier",      n_high)
-        g4.metric("🟡 Medium tier",    n_med)
-        g5.metric("🟢 Low tier",       n_low)
-        st.divider()
-
-        # Filters
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1:
-            tier_f = st.multiselect(
-                "Filter by risk tier",
-                ["Critical","High","Medium","Low",""],
-                default=["Critical","High","Medium","Low",""],
-                format_func=lambda x: x if x else "No tier",
-            )
-        with fc2:
-            resp_f2 = st.multiselect(
-                "Filter by response",
-                ["No","Partial","—"],
-                default=["No","Partial","—"],
-                format_func=lambda x: x if x != "—" else "Unanswered",
-            )
-        with fc3:
-            dom_f = st.multiselect(
-                "Filter by domain",
-                sorted({g["domain_name"] for g in gaps_all}),
-                default=sorted({g["domain_name"] for g in gaps_all}),
-            )
-
-        shown_gaps = [
-            g for g in gaps_all
-            if g["tier"] in tier_f and g["norm"] in resp_f2 and g["domain_name"] in dom_f
-        ]
-
-        # Sort: Critical first
-        tier_order = {"Critical":0,"High":1,"Medium":2,"Low":3,"":4}
-        shown_gaps.sort(key=lambda x: tier_order.get(x["tier"], 4))
-
-        st.caption(f"Showing {len(shown_gaps)} of {len(gaps_all)} gaps")
-
-        for g in shown_gaps:
-            norm  = g["norm"]
-            bg    = {"No": "#fff5f5", "Partial": "#fffaf5", "—": "#fafafa"}.get(norm, "#fafafa")
-            border = {"No": "#f7c1c1", "Partial": "#FAC775", "—": "#e9ecef"}.get(norm, "#e9ecef")
-            t_badge = tier_pill(g["tier"]) if g["tier"] else ""
-            r_badge = resp_pill(norm)
-            unans_note = '<span style="font-size:11px;color:#aaa"> — not yet answered</span>' if norm == "—" else ""
-
-            st.markdown(
-                f'<div style="padding:10px 14px;border-radius:8px;margin-bottom:6px;'
-                f'background:{bg};border:0.5px solid {border}">'
-                f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-                f'<div style="flex:1">'
-                f'<div style="font-size:11px;color:#aaa;margin-bottom:3px">'
-                f'{g["key"]} &nbsp;·&nbsp; {g["domain_name"]}'
-                f'{("&nbsp;&nbsp;" + t_badge) if t_badge else ""}'
-                f'</div>'
-                f'<div style="font-size:13px;color:#333;line-height:1.55">'
-                f'{g["question"]}{unans_note}</div>'
-                f'</div>'
-                f'<div style="flex-shrink:0;padding-top:2px">{r_badge}</div>'
-                f'</div>'
-                f'</div>', unsafe_allow_html=True,
-            )
-
-        # Export
-        st.divider()
-        gap_df = pd.DataFrame([{
-            "Key":       g["key"],
-            "Domain":    g["domain_name"],
-            "Question":  g["question"],
-            "Response":  g["norm"],
-            "Risk Tier": g["tier"],
-            "Remarks":   g["other"],
-        } for g in shown_gaps])
-
-        e1, e2, _ = st.columns([1,1,3])
-        with e1:
-            st.download_button(
-                "⬇ Export gaps CSV", data=gap_df.to_csv(index=False).encode(),
-                file_name="tpcra_gaps.csv", mime="text/csv", use_container_width=True,
-            )
-        with e2:
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                gap_df.to_excel(writer, index=False, sheet_name="Gaps")
-            st.download_button(
-                "⬇ Export gaps Excel", data=buf.getvalue(),
-                file_name="tpcra_gaps.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-
 
 # ══════════════════════════
-# TAB 4 — EVIDENCE
+# TAB 3 — EVIDENCE
 # ══════════════════════════
 with tab_evidence:
     if not evidence:
@@ -1597,7 +1465,7 @@ with tab_evidence:
 
 
 # ══════════════════════════
-# TAB 5 — PART 1
+# TAB 4 — ENGAGEMENT INFO
 # ══════════════════════════
 with tab_part1:
     if not p1_data or not p1_data.get("items"):
@@ -1661,7 +1529,7 @@ with tab_part1:
 
 
 # ══════════════════════════
-# TAB 6 — GAP SUMMARY
+# TAB 5 — GAP SUMMARY
 # ══════════════════════════
 with tab_gap_summary:
 

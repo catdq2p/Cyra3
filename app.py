@@ -1113,8 +1113,8 @@ n_part = sum(1 for i in p2_items if i["norm"] == "Partial")
 n_na   = sum(1 for i in p2_items if i["norm"] == "N/A")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_overview, tab_domain, tab_evidence, tab_part1, tab_gap_summary = st.tabs([
-    "Overview", "By domain", "Evidence checklist", "Engagement info", "Gap summary"
+tab_part1, tab_overview, tab_gap_summary, tab_domain, tab_evidence = st.tabs([
+    "Engagement info", "Overview", "Gap summary", "By domain", "Evidence checklist"
 ])
 
 # ══════════════════════════

@@ -1066,13 +1066,13 @@ if not uploaded:
     st.markdown("Upload a completed TPCRA v3.0 questionnaire from the sidebar to generate the dashboard.")
     st.divider()
     c1, c2, c3 = st.columns(3)
-    c1.info("**Overview**\nCompliance score, risk rating, response distribution, and domain scores across all 14 domains.")
-    c2.info("**By domain**\nDrill into any of the A–N domains with per-question response cards, tier badges, and vendor remarks.")
-    c3.info("**Gap summary**\nAll No / N/A / Partial / unanswered controls grouped by tier, with NIST-grounded recommendations and PDF export.")
+    c1.info("**Overview**\nCompliance scores, response distribution, domain charts, and per-domain question drill-down.")
+    c2.info("**Gap List**\nAll No / N/A / Partial / unanswered controls grouped by domain, with recommendations and PDF export.")
+    c3.info("**Evidence Checklist**\nEvidence submission status against the 14 required evidence items from the TPCRA v3.0 checklist.")
     c4, c5, c6 = st.columns(3)
-    c4.info("**Gap analysis**\nFlat filterable list of every gap item — by tier, response type, and domain — with CSV/Excel export.")
-    c5.info("**Evidence checklist**\nEvidence submission status against the 14 required evidence items from the TPCRA v3.0 checklist.")
-    c6.info("**Engagement info**\nVendor contact details, engagement description, data handling, and transmission methods from Part 1.")
+    c4.info("**Engagement Info**\nVendor contact details, engagement description, data handling, and transmission methods from Part 1.")
+    c5.markdown("")
+    c6.markdown("")
     st.stop()
 
 # ── Load workbook ──────────────────────────────────────────────────────────────
@@ -1128,13 +1128,13 @@ n_part = sum(1 for i in p2_items if i["norm"] == "Partial")
 n_na   = sum(1 for i in p2_items if i["norm"] == "N/A")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_part1, tab_overview, tab_gap_summary, tab_domain, tab_evidence = st.tabs([
-    "Engagement info", "Overview", "Gap summary", "By domain", "Evidence checklist"
+tab_part1, tab_overview, tab_gap_summary, tab_evidence = st.tabs([
+    "Engagement Info", "Overview", "Gap List", "Evidence Checklist"
 ])
 
-# ══════════════════════════
-# TAB 1 — OVERVIEW
-# ══════════════════════════
+# ══════════════════════════════════════════════
+# TAB 1 — OVERVIEW  (includes By Domain drill-down)
+# ══════════════════════════════════════════════
 with tab_overview:
     col_bar, col_right = st.columns([3, 2])
 
@@ -1212,10 +1212,10 @@ with tab_overview:
                     f'</div></div>', unsafe_allow_html=True,
                 )
 
-# ══════════════════════════
-# TAB 2 — BY DOMAIN
-# ══════════════════════════
-with tab_domain:
+    # ── By domain drill-down ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("By domain")
+
     domain_choices = [f"{l} — {domains[l]['name']}" for l in domains if domains[l]["items"]]
     if not domain_choices:
         st.info("No domain data found.")
@@ -1294,9 +1294,6 @@ with tab_domain:
                         f'<div style="font-size:13px;color:#444;line-height:1.6;white-space:pre-wrap">'
                         f'{item["response"]}</div>', unsafe_allow_html=True
                     )
-
-
-
 # ══════════════════════════
 # TAB 3 — EVIDENCE
 # ══════════════════════════

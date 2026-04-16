@@ -623,168 +623,21 @@ def make_sample_excel() -> bytes:
 
 
 # ── PDF generation ────────────────────────────────────────────────────────────
-def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: str = "") -> bytes:
+def generate_vendor_pdf(
+    live_gaps: list,
+    vendor_name: str = "",
+    assessment_date: str = "",
+    total_questions: int = 0,
+    gap_db: list = None,
+) -> bytes:
     """
-    Generate a vendor-facing gap summary PDF (2 pages) using ReportLab.
-    Page 1 — Gap overview: KPIs + domain gap table + expectations note.
-    Page 2 — NIST-grounded recommendations per domain.
+    Generate a vendor-facing gap report PDF from live questionnaire gap data.
+    Page 1 — KPI summary + domain summary table.
+    Page 2+ — Detailed gap listing per domain with high-level recommendations.
+    gap_db — optional GAP_DB list; used to render per-domain recommendations.
     """
-
-    # ── NIST-grounded recommendations database ─────────────────────────────────
-    # Sources: NIST SP 800-53r5, NIST SP 800-161r1, NIST CSF 2.0
-    NIST_RECS = {
-        "A": {
-            "title": "Organizational Management",
-            "nist_refs": "NIST CSF 2.0: GV.PO / NIST SP 800-53r5: PL-1, PL-2, PM-1, PM-9",
-            "recs": [
-                ("Establish & document an IS policy", "Formally document and approve an Information Security Policy covering all required topics. Per NIST SP 800-53r5 PL-1, policies must state purpose, scope, roles, responsibilities, and management commitment, and be reviewed at defined intervals."),
-                ("Adopt a risk management framework", "Implement a formal risk management framework such as NIST CSF 2.0 or ISO 27001. NIST SP 800-161r1 requires enterprises to integrate C-SCRM into enterprise-wide risk management and establish an ERM council with CISO participation (SP 800-161r1 Sec. 2)."),
-                ("Obtain independent certification", "Pursue and maintain a third-party security certification (ISO 27001, SOC 2 Type 2). NIST SP 800-161r1 SA-9 requires periodic revalidation of supplier adherence to security requirements via requisite certifications, site visits, or third-party assessments."),
-                ("Enforce policy acknowledgement", "Ensure all staff and contractors formally acknowledge security policies. NIST SP 800-53r5 PS-6 requires signed access agreements that reference policy obligations for all personnel, including contractor staff."),
-            ],
-        },
-        "B": {
-            "title": "Human Resource Management",
-            "nist_refs": "NIST SP 800-53r5: PS-3, PS-6, PS-7, AT-2, AT-3 / NIST SP 800-161r1: PS-3, PS-7",
-            "recs": [
-                ("Screen all personnel before access", "Extend background screening to contractors and third-party personnel. Per NIST SP 800-161r1 PS-3, personnel screening policies must apply to any contractor with authorized system access, with continuous monitoring commensurate with access level, and flowed down to sub-tier contractors."),
-                ("Formalize offboarding access revocation", "Implement a formal offboarding process that revokes all logical and physical access on the last day. NIST SP 800-53r5 AC-3(8) requires prompt revocation of access authorizations for contractors who no longer require access, including retirement of credentials and disabling of all accounts."),
-                ("Deliver role-based security training", "Provide security awareness training to all staff including contractors. NIST SP 800-53r5 AT-2 and AT-3 require role-based training covering insider threat (AT-2(2)), social engineering (AT-2(3)), and phishing (AT-2(4)), with completion records maintained (AT-4)."),
-                ("Deploy insider threat controls", "Implement user behaviour analytics and separation of duties. NIST SP 800-161r1 AT-2(2) specifically requires awareness training to address insider threat risks within the supply chain context."),
-            ],
-        },
-        "C": {
-            "title": "Infrastructure Security",
-            "nist_refs": "NIST SP 800-53r5: SC-7, SC-8, SI-2, SI-3, RA-5 / NIST SP 800-161r1: AC-17, SI-2",
-            "recs": [
-                ("Implement network segmentation & DMZ", "Separate web, application, and database tiers with a DMZ for internet-facing services. NIST SP 800-53r5 SC-7 requires boundary protection controls including managed interfaces and sub-networks (DMZ) for publicly accessible system components."),
-                ("Enforce encrypted communications only", "Disable deprecated protocols (TLS 1.0/1.1, FTP, Telnet) and enforce TLS 1.2+ for all inter-system communication. Per NIST SP 800-53r5 SC-8, cryptographic mechanisms must protect the confidentiality and integrity of all transmitted information."),
-                ("Mandate MFA for all remote access", "Enforce multi-factor authentication for VPN, remote desktop, and cloud console access. NIST SP 800-161r1 AC-17 specifies that remote access to supply chain systems must employ MFA, be limited to vetted personnel, and be contractually defined with restrictions by location and business hours."),
-                ("Define SLA-based patch management", "Establish documented SLA timelines: Critical patches within 24h, High within 7 days, Medium within 30 days. NIST SP 800-53r5 SI-2 requires timely remediation of information system flaws; SP 800-161r1 SI-7 requires integrity verification of patches, including digital signature validation."),
-                ("Deploy SIEM for centralized monitoring", "Aggregate logs in a SIEM and establish 24x7 SOC coverage. NIST SP 800-53r5 SI-4 requires continuous monitoring of information systems; NIST SP 800-161r1 AU-2 requires auditable supply chain events to be captured, correlated, and reviewed on an ongoing basis."),
-            ],
-        },
-        "D": {
-            "title": "Data Protection",
-            "nist_refs": "NIST SP 800-53r5: SC-8, SC-12, SC-28, MP-6 / NIST SP 800-161r1: AC-4, PT-1",
-            "recs": [
-                ("Classify and label all data assets", "Implement a data classification policy aligned to sensitivity tiers. NIST SP 800-53r5 RA-2 requires information classification; SP 800-161r1 AC-4(19) requires validation of data metadata to ensure proper handling within the supply chain."),
-                ("Encrypt data at rest, in transit & backup", "Apply AES-256 for data at rest and TLS 1.2+ in transit. NIST SP 800-53r5 SC-28 mandates protection of information at rest using cryptographic mechanisms; SC-8 covers data in transit. All backup media must also be encrypted prior to storage."),
-                ("Implement formal key management", "Establish a documented key lifecycle (generation, rotation, revocation, destruction) with dual control. NIST SP 800-53r5 SC-12 requires cryptographic key establishment and management procedures; no single individual should have sole access to complete key material."),
-                ("Enforce secure data destruction", "Define retention schedules and secure destruction procedures per NIST SP 800-53r5 MP-6, which requires sanitizing or destroying media containing information prior to disposal or reuse, including backup data at contract termination."),
-                ("Deploy DLP controls", "Implement Data Loss Prevention to detect and prevent unauthorized exfiltration. NIST SP 800-161r1 AC-4 requires information flow controls across supply chain boundaries, including physical or logical separation to prevent unauthorized release of enterprise data."),
-            ],
-        },
-        "E": {
-            "title": "Access Management",
-            "nist_refs": "NIST SP 800-53r5: AC-2, AC-3, AC-6, IA-2, IA-5 / NIST SP 800-161r1: AC-2, AC-6(6), IA-2",
-            "recs": [
-                ("Enforce need-to-know access provisioning", "Grant access only through a documented, approved request process. NIST SP 800-161r1 AC-2 requires unique contractor accounts with access that does not exceed the period of performance, and privileged accounts only for appropriately vetted personnel."),
-                ("Conduct periodic access reviews", "Review all user access at least quarterly. NIST SP 800-53r5 AC-2(6) requires dynamic access management with regular review; SP 800-161r1 AC-3(8) requires prompt revocation when access is no longer needed, including credential retirement and account disabling."),
-                ("Enforce organization-wide MFA", "Mandate MFA for all accounts, with stronger enforcement for privileged and remote users. NIST SP 800-53r5 IA-2(1) requires MFA for privileged access; IA-2(2) extends this to non-privileged accounts accessing sensitive systems."),
-                ("Manage privileged access via PAM", "Implement a Privileged Access Management solution with JIT access, session recording, and dual control. NIST SP 800-161r1 AC-6(6) prohibits non-enterprise users from having privileged access and requires least-privilege mechanisms defining what is accessible, for what duration, and by whom."),
-                ("Use strong credential storage", "Store all passwords using salted hashing (bcrypt, Argon2). NIST SP 800-53r5 IA-5 requires authenticator management practices that prevent plain-text storage; authenticators must be changed prior to delivery (IA-5(5)) and managed through federated credential controls where applicable."),
-            ],
-        },
-        "F": {
-            "title": "Application Security",
-            "nist_refs": "NIST SP 800-53r5: SA-3, SA-8, SA-11, SA-15 / NIST SP 800-161r1: SA-3, SA-8, SI-7",
-            "recs": [
-                ("Embed security in the SDLC", "Integrate security requirements into every SDLC phase. NIST SP 800-53r5 SA-3 requires a system development life cycle with defined information security roles, and SA-15 requires a development process that addresses security during requirements, design, development, testing, and operations."),
-                ("Mandate pre-launch penetration testing", "Conduct penetration testing and secure code review before any application goes live. NIST SP 800-53r5 SA-11 requires developer testing including security assessments; SP 800-161r1 SA-8 requires anticipating misuse scenarios in architecture and design."),
-                ("Adopt secure coding standards", "Formally adopt OWASP Top 10 and SANS CWE Top 25. NIST SP 800-53r5 SA-8 requires security and privacy engineering principles to be applied, limiting privilege levels of critical elements and designing to reduce opportunities to exploit vulnerabilities."),
-                ("Implement API security controls", "Enforce OAuth 2.0, rate limiting, and input validation on all APIs. NIST SP 800-53r5 SC-7 boundary protection principles apply to API endpoints; SA-8 requires controlling the number and privilege levels of interfaces exposed to external parties."),
-                ("Maintain SBOM and SCA processes", "Generate and maintain a Software Bill of Materials and scan dependencies for vulnerabilities. Per NIST SP 800-161r1 SI-7, integrity of software components must be systematically tested and verified, including hash/signature validation of components from external repositories."),
-            ],
-        },
-        "G": {
-            "title": "System Security",
-            "nist_refs": "NIST SP 800-53r5: AU-2, AU-3, AU-6, AU-12, SI-4, RA-5 / NIST SP 800-161r1: AU-2, AU-6, AU-16",
-            "recs": [
-                ("Generate comprehensive audit trails", "Enable audit logging for all admin actions, authentication events, and access changes. NIST SP 800-53r5 AU-2 requires event logging for user actions, failed logins, and account management; AU-3 specifies the required content of audit records including user ID, event type, date/time, and success/failure."),
-                ("Protect logs against tampering", "Store logs in write-once or SIEM-forwarded storage with integrity monitoring. NIST SP 800-53r5 AU-9 protects audit information from unauthorized access, modification, and deletion; NIST SP 800-161r1 AU-10 requires non-repudiation techniques to protect the originality and integrity of audit records."),
-                ("Review logs via automated SIEM correlation", "Implement SIEM with automated correlation rules for anomaly detection. NIST SP 800-161r1 AU-6 requires supply chain and information security audit events to be filtered, correlated, and reported; log review frequency must be adjusted based on vendor risk profile changes."),
-                ("Conduct quarterly vulnerability scanning", "Run automated vulnerability scans at least quarterly with SLA-tracked remediation. NIST SP 800-53r5 RA-5 requires vulnerability scanning at defined frequencies; findings must be remediated within organization-defined time periods commensurate with their risk rating."),
-                ("Retain logs for at least 12 months", "Maintain audit trail history for a minimum of 12 months with 3 months online. NIST SP 800-161r1 AU-16 requires cross-organizational audit logging with service-level agreements governing sharing and retention of audit information between the enterprise and its service providers."),
-            ],
-        },
-        "H": {
-            "title": "Email Security",
-            "nist_refs": "NIST SP 800-53r5: SI-3, SI-8, SC-8 / NIST CSF 2.0: PR.PS",
-            "recs": [
-                ("Deploy email gateway with sandboxing", "Implement an email security gateway with URL rewriting and attachment sandboxing. NIST SP 800-53r5 SI-8 requires spam and malicious content protection for inbound and outbound email; SI-3 requires malicious code protection at entry and exit points."),
-                ("Implement SPF, DKIM & DMARC", "Deploy email authentication protocols with at minimum a DMARC quarantine policy. NIST SP 800-53r5 SC-8 requires mechanisms protecting the integrity of transmitted information; email authentication prevents domain spoofing and impersonation attacks."),
-                ("Encrypt sensitive email transmissions", "Encrypt outbound email attachments containing confidential or restricted data. Per NIST SP 800-53r5 SC-8(1), cryptographic mechanisms must be applied to protect the confidentiality of information during transmission over external networks."),
-                ("Run annual phishing simulations", "Conduct simulated phishing exercises at least annually to measure awareness. NIST SP 800-53r5 AT-2(4) specifically requires training on suspicious communications and anomalous system behavior, with completion tracking and results used to update the training program."),
-            ],
-        },
-        "I": {
-            "title": "Mobile Devices",
-            "nist_refs": "NIST SP 800-53r5: AC-19, MP-5, SC-28 / NIST SP 800-161r1: AC-19",
-            "recs": [
-                ("Enforce full-disk encryption on all laptops", "Mandate full-disk encryption (BitLocker, FileVault, or equivalent) enforced by policy. NIST SP 800-53r5 SC-28 requires protection of information at rest; MP-5 requires protection during transport, including on portable storage devices and laptops."),
-                ("Enrol all devices in MDM", "Enrol all corporate and BYOD devices in a Mobile Device Management solution. NIST SP 800-53r5 AC-19 requires access control for mobile devices including configuration management, preventing unauthorized connection, and enforcing minimum security requirements before allowing corporate access."),
-                ("Implement remote wipe capability", "Ensure all enrolled devices can be remotely locked and wiped via MDM. Per NIST SP 800-53r5 AC-19, organizations must be able to remotely wipe devices before returning to personally owned state; this is critical for data protection on lost or stolen devices."),
-                ("Block non-compliant and rooted devices", "Automatically block jailbroken, rooted, or non-compliant devices from corporate resources. NIST SP 800-161r1 AC-19 requires access control for mobile devices accessing supply chain systems, with configuration management ensuring devices meet minimum security standards before connection."),
-            ],
-        },
-        "J": {
-            "title": "Incident Response",
-            "nist_refs": "NIST SP 800-53r5: IR-2, IR-3, IR-4, IR-6, IR-8 / NIST SP 800-161r1: IR-4, IR-5, IR-6(3), IR-8",
-            "recs": [
-                ("Develop & maintain a documented IRP", "Establish a formal Incident Response Plan with defined roles and escalation paths. NIST SP 800-161r1 IR-8 requires the IRP to include information-sharing responsibilities with critical suppliers; the plan must cover supply chain-specific incidents and define coordination protocols with third parties."),
-                ("Test the IRP at least annually", "Conduct tabletop exercises or simulations annually and document lessons learned. NIST SP 800-53r5 IR-3 requires testing of the incident response capability using defined exercises; results must feed back into plan updates and training improvements."),
-                ("Define a contractual incident notification SLA", "Agree on a notification SLA (recommended: confirmed breaches within 4 hours). NIST SP 800-161r1 IR-6(3) requires incident reporting from suppliers to be protected in transmission and received only by approved individuals; reporting escalations must be clearly defined in the contract."),
-                ("Establish 24x7 SOC coverage", "Maintain or contract 24x7 security operations for continuous incident detection. NIST SP 800-53r5 IR-4 requires an incident handling capability that includes preparation, detection, analysis, containment, eradication, and recovery; SP 800-161r1 IR-7(1) specifies that agreements must identify third-party incident response assistance conditions."),
-                ("Include suppliers in incident response", "Integrate key suppliers into tabletop exercises and escalation matrices. NIST SP 800-161r1 IR-4(11) recommends that integrated incident response teams include forensics capability and, where practical, suppliers and external service providers with geographical representation."),
-            ],
-        },
-        "K": {
-            "title": "Cloud Services",
-            "nist_refs": "NIST SP 800-53r5: SA-9, SC-7, SC-12, AU-2 / NIST SP 800-161r1: SA-9, AC-20",
-            "recs": [
-                ("Verify CSP third-party certifications", "Confirm CSP holds current ISO 27001, SOC 2 Type 2, or PCI-DSS certification. NIST SP 800-161r1 SA-9 requires periodic revalidation of external service provider adherence to security requirements via certifications or third-party assessments commensurate with criticality."),
-                ("Confirm tenant data isolation", "Obtain and review the Shared Responsibility Matrix from the CSP. NIST SP 800-53r5 SA-9(5) requires that external service providers separate organizational information from that of other customers; multi-tenancy isolation must be documented and verified."),
-                ("Enforce least privilege for cloud admin access", "Restrict hypervisor and admin console access to vetted personnel with MFA and least privilege. NIST SP 800-161r1 AC-20(1) limits authorized use of external systems; privileged access to CSP management planes must meet the same standards as internal privileged access controls."),
-                ("Implement formal cloud key management", "Use CSP-native key management (AWS KMS, Azure Key Vault) with documented lifecycle. NIST SP 800-53r5 SC-12 requires cryptographic key establishment; key generation, distribution, storage, and destruction must follow a documented procedure with no single individual holding complete key material."),
-                ("Require data deletion certificates", "Include contractual commitment for permanent deletion of all data at termination with written evidence. NIST SP 800-53r5 MP-6 requires media sanitization; for cloud services this must be contractually defined to ensure that all company data is purged from systems, storage, and backups upon termination."),
-            ],
-        },
-        "L": {
-            "title": "Business Continuity",
-            "nist_refs": "NIST SP 800-53r5: CP-2, CP-4, CP-6, CP-9 / NIST SP 800-161r1: CP-2, CP-6, CP-7, CP-8",
-            "recs": [
-                ("Develop and approve a formal BCP", "Establish a formally approved Business Continuity Plan with defined RTO and RPO targets. NIST SP 800-53r5 CP-2 requires a contingency plan addressing essential missions, recovery objectives, and full system reconstitution; it must be reviewed at defined frequencies and approved by authorized officials."),
-                ("Test the BCP at least annually", "Conduct annual BCP and DR tests (tabletop, failover, or full simulation). NIST SP 800-53r5 CP-4 requires testing of the contingency plan to validate effectiveness and identify gaps; test results must be documented and used to update the plan."),
-                ("Validate RTO/RPO through actual testing", "Document RTO and RPO targets and verify them through actual failover testing. NIST SP 800-53r5 CP-2(1) requires coordination with external service providers; SP 800-161r1 CP-7 requires that alternative processing sites managed by service providers apply appropriate supply chain cybersecurity controls."),
-                ("Implement off-site encrypted backups", "Store critical data backups securely off-site or in a separate cloud region. NIST SP 800-53r5 CP-6 requires an alternate storage site with appropriate controls; CP-9 requires information system backup including user-level data, system-level data, and system documentation, stored separately from the primary site."),
-                ("Include suppliers in continuity planning", "Ensure critical suppliers are included in contingency plans and tested. NIST SP 800-161r1 CP-8(4) requires that telecommunications service provider contingency plans provide separation in infrastructure, service, process, and personnel to support supply chain resilience."),
-            ],
-        },
-        "M": {
-            "title": "Supply Chain & Physical Security",
-            "nist_refs": "NIST SP 800-161r1: SR-1, SR-3, SR-6, PE-2 / NIST SP 800-53r5: SR-5, SR-6, PE-2, PE-3",
-            "recs": [
-                ("Establish a formal TPRM program", "Implement a documented Third-Party/Vendor Risk Management program. NIST SP 800-161r1 requires a C-SCRM governance structure with a dedicated PMO or equivalent function; vendor risk assessments must be performed at enterprise, mission, and operational levels (SP 800-161r1 Sec. 2)."),
-                ("Inventory & disclose all sub-processors", "Identify and disclose all fourth parties with access to company data. NIST SP 800-161r1 requires supply chain visibility including identification of sub-tier suppliers; enterprises must flow C-SCRM control requirements down to prime contractors with requirements to further flow them to relevant sub-tier contractors."),
-                ("Flow security requirements to sub-processors", "Include equivalent security obligations in all sub-processor contracts. NIST SP 800-161r1 SA-9 mandates satisfaction of applicable security requirements as a qualifying condition for award; contractual terms must address roles, responsibilities, and actions for responding to supply chain risk incidents."),
-                ("Enforce physical access controls", "Restrict data centre access to authorized personnel with multi-factor physical controls. NIST SP 800-53r5 PE-2 requires physical access authorizations; PE-3 requires physical access control at all entry/exit points with controlled visitor access, escort requirements, and maintained access logs."),
-                ("Assess sub-processors at least annually", "Conduct security assessments or evidence reviews for critical sub-processors annually. NIST SP 800-161r1 requires periodic revalidation of supplier adherence to security requirements; acceptable methods include certifications, site visits, third-party assessments, or self-attestation commensurate with criticality."),
-            ],
-        },
-        "N": {
-            "title": "AI & Emerging Technology Risk",
-            "nist_refs": "NIST AI RMF 1.0: GOVERN, MAP, MEASURE / NIST CSF 2.0: GV.OC / NIST SP 800-53r5: SA-8, AU-2",
-            "recs": [
-                ("Establish a formal AI governance policy", "Publish an AI usage policy covering acceptable use, prohibited inputs, output handling, and accountability, approved by CISO/DPO. The NIST AI Risk Management Framework (AI RMF 1.0) GOVERN function requires organizations to establish policies, processes, and accountability structures for AI risk management before AI systems are deployed."),
-                ("Conduct AI risk assessments", "Perform a formal AI risk assessment for all AI components in scope, reviewed annually. NIST AI RMF MAP function requires organizations to categorize AI risks by likelihood and impact; high-risk AI use cases (credit, fraud, identity) must undergo bias testing and explainability review per regulatory requirements."),
-                ("Require DPA from AI service providers", "Obtain Data Processing Agreements from all third-party AI providers confirming no model training on client data. NIST SP 800-161r1 PT-1 requires contracts to specify what data will be shared, which personnel may access it, applicable controls, retention periods, and data handling at contract end."),
-                ("Implement PII controls for AI inputs", "Deploy masking or tokenization to prevent PII from entering AI models unnecessarily. NIST AI RMF MEASURE function requires measurement of data quality, relevance, and bias; technical controls must prevent sensitive data from being exposed to AI systems where not required for the intended use case."),
-                ("Protect AI systems from adversarial attacks", "Deploy prompt injection detection and output guardrails; enforce RBAC and MFA for all AI system access. NIST SP 800-53r5 SA-8 requires security engineering principles to anticipate maximum possible misuse scenarios; adversarial inputs and prompt injection are recognized attack vectors that must be addressed in AI system design."),
-                ("Maintain tamper-protected AI audit logs", "Log all AI interactions (inputs, outputs, user identity, timestamps) in tamper-protected storage. NIST SP 800-53r5 AU-2 and AU-12 require event logging and audit record generation for system interactions; for AI systems this extends to model inputs and outputs to support forensic investigation of misuse or data leakage incidents."),
-            ],
-        },
-    }
+    from reportlab.platypus import PageBreak
+    from collections import OrderedDict
 
     buf = io.BytesIO()
     PAGE_W, PAGE_H = A4
@@ -799,13 +652,28 @@ def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: st
     C_RED    = colors.HexColor("#A32D2D")
     C_AMB    = colors.HexColor("#854F0B")
     C_BLU    = colors.HexColor("#185FA5")
+    C_GRN    = colors.HexColor("#3B6D11")
     C_GRY    = colors.HexColor("#6c757d")
     C_BDR    = colors.HexColor("#e9ecef")
     C_HDR_BG = colors.HexColor("#1a1a2e")
     C_TBL_BG = colors.HexColor("#f8f9fa")
     C_REC_BG = colors.HexColor("#F0F4FF")
     C_REC_BD = colors.HexColor("#c7d2fe")
-    TIER_FG  = {"Critical": C_RED, "High": C_AMB, "Medium": C_BLU}
+
+    TIER_FG = {"Critical": C_RED, "High": C_AMB, "Medium": C_BLU, "Low": C_GRN}
+    TIER_BG = {
+        "Critical": colors.HexColor("#FCEBEB"),
+        "High":     colors.HexColor("#FAEEDA"),
+        "Medium":   colors.HexColor("#E6F1FB"),
+        "Low":      colors.HexColor("#EAF3DE"),
+    }
+    RESP_FG = {"No": C_RED, "Partial": C_AMB, "N/A": C_GRY, "—": C_GRY}
+    RESP_BG = {
+        "No":      colors.HexColor("#FCEBEB"),
+        "Partial": colors.HexColor("#FAEEDA"),
+        "N/A":     colors.HexColor("#F1EFE8"),
+        "—":       colors.HexColor("#F1EFE8"),
+    }
 
     def _s(name, **kw):
         s = ParagraphStyle(name)
@@ -813,45 +681,49 @@ def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: st
             setattr(s, k, v)
         return s
 
-    s_title   = _s("title",   fontSize=13, fontName="Helvetica-Bold",  textColor=colors.white,            alignment=TA_LEFT,   leading=17)
-    s_body    = _s("body",    fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#333"), leading=11)
-    s_small   = _s("small",   fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   leading=10)
-    s_ref     = _s("ref",     fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY)
-    s_sec     = _s("sec",     fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY,                   spaceBefore=4,  spaceAfter=2)
-    s_note    = _s("note",    fontSize=7.5,fontName="Helvetica-Oblique",textColor=C_GRY,                   leading=11)
-    s_footer  = _s("footer",  fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   alignment=TA_CENTER)
-    s_nist    = _s("nist",    fontSize=6.5,fontName="Helvetica-Oblique",textColor=C_BLU,                   leading=9)
-    s_rec_hd  = _s("rec_hd",  fontSize=7.5,fontName="Helvetica-Bold",  textColor=colors.HexColor("#1a1a2e"), leading=10)
-    s_rec_bod = _s("rec_bod", fontSize=7,  fontName="Helvetica",        textColor=colors.HexColor("#444"), leading=10)
-    s_dom_hd  = _s("dom_hd",  fontSize=9,  fontName="Helvetica-Bold",  textColor=colors.white,             leading=12)
+    s_title  = _s("title",  fontSize=13, fontName="Helvetica-Bold",  textColor=colors.white,             alignment=TA_LEFT,  leading=17)
+    s_body   = _s("body",   fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#333"), leading=11)
+    s_small  = _s("small",  fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   leading=10)
+    s_ref    = _s("ref",    fontSize=7,  fontName="Helvetica-Bold",   textColor=C_GRY)
+    s_q      = _s("q",      fontSize=7.5,fontName="Helvetica",        textColor=colors.HexColor("#222"), leading=10)
+    s_rmk    = _s("rmk",    fontSize=6.5,fontName="Helvetica-Oblique",textColor=C_GRY,                   leading=9)
+    s_sec    = _s("sec",    fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY,                   spaceBefore=5, spaceAfter=2)
+    s_note   = _s("note",   fontSize=7.5,fontName="Helvetica-Oblique",textColor=C_GRY,                   leading=11)
+    s_footer = _s("footer", fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                   alignment=TA_CENTER)
+    s_rec_hd = _s("rec_hd", fontSize=7.5,fontName="Helvetica-Bold",   textColor=colors.HexColor("#1a1a2e"), leading=10)
+    s_rec    = _s("rec",    fontSize=7,  fontName="Helvetica",        textColor=colors.HexColor("#333"),  leading=10)
+
+    # Build a quick lookup: domain letter → list of recommendation strings
+    rec_lookup: dict = {}
+    if gap_db:
+        for entry in gap_db:
+            if entry.get("recs"):
+                rec_lookup[entry["id"]] = entry["recs"]
 
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=MARGIN, rightMargin=MARGIN,
-        topMargin=MARGIN,  bottomMargin=MARGIN,
+        topMargin=MARGIN, bottomMargin=14*mm,
     )
     story = []
 
     # ── shared helpers ─────────────────────────────────────────────────────────
-    def _footer_row(page_label):
-        ft = Table(
-            [[
-                Paragraph(f"TPCRA v3.0  |  For vendor assessment use only  |  Internal — Confidential  |  {page_label}", s_footer),
-                Paragraph(f"Generated: {assessment_date}", _s("fr", fontSize=7, fontName="Helvetica", textColor=C_GRY, alignment=TA_RIGHT)),
-            ]],
-            colWidths=[usable_w * 0.72, usable_w * 0.28],
-        )
+    def _footer_row():
+        ft = Table([[
+            Paragraph("TPCRA v3.0  |  For vendor assessment use only  |  Confidential", s_footer),
+            Paragraph(f"Generated: {assessment_date}",
+                      _s("fr", fontSize=7, fontName="Helvetica", textColor=C_GRY, alignment=TA_RIGHT)),
+        ]], colWidths=[usable_w * 0.72, usable_w * 0.28])
         ft.setStyle(TableStyle([
-            ("TOPPADDING",  (0,0),(-1,-1), 5),
-            ("LINEABOVE",   (0,0),(-1,-1), 0.5, C_BDR),
+            ("TOPPADDING", (0,0),(-1,-1), 5),
+            ("LINEABOVE",  (0,0),(-1,-1), 0.5, C_BDR),
         ]))
         return ft
 
-    def _header_banner(subtitle=""):
-        title_text = "Third-Party Cyber Risk Assessment  —  Gap Summary Report"
-        if subtitle:
-            title_text += f"  |  {subtitle}"
-        t = Table([[Paragraph(title_text, s_title)]], colWidths=[usable_w])
+    def _header_banner():
+        t = Table([[Paragraph(
+            "Third-Party Cyber Risk Assessment  —  Gap Assessment Report", s_title
+        )]], colWidths=[usable_w])
         t.setStyle(TableStyle([
             ("BACKGROUND",   (0,0),(-1,-1), C_HDR_BG),
             ("TOPPADDING",   (0,0),(-1,-1), 10),
@@ -862,15 +734,14 @@ def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: st
         return t
 
     def _meta_row():
-        t = Table(
-            [[
-                Paragraph(f"<b>Vendor:</b> {vendor_line}", s_body),
-                Paragraph(f"<b>Assessment date:</b> {assessment_date}", s_body),
-                Paragraph("<b>Framework:</b> TPCRA v3.0", s_body),
-                Paragraph("<b>Classification:</b> Confidential", s_body),
-            ]],
-            colWidths=[usable_w*0.30, usable_w*0.26, usable_w*0.22, usable_w*0.22],
-        )
+        n_gaps  = len(live_gaps)
+        pct_gap = f"{round(n_gaps / total_questions * 100)}%" if total_questions else "—"
+        t = Table([[
+            Paragraph(f"<b>Vendor:</b> {vendor_line}", s_body),
+            Paragraph(f"<b>Assessment date:</b> {assessment_date}", s_body),
+            Paragraph(f"<b>Total gaps:</b> {n_gaps} of {total_questions} ({pct_gap})", s_body),
+            Paragraph("<b>Framework:</b> TPCRA v3.0", s_body),
+        ]], colWidths=[usable_w*0.30, usable_w*0.26, usable_w*0.26, usable_w*0.18])
         t.setStyle(TableStyle([
             ("BACKGROUND",   (0,0),(-1,-1), C_TBL_BG),
             ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
@@ -882,272 +753,282 @@ def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: st
         ]))
         return t
 
+    # ── aggregate counts ───────────────────────────────────────────────────────
+    def _cnt(items, tier=None, resp=None):
+        return sum(1 for i in items
+                   if (tier is None or i["tier"] == tier)
+                   and (resp is None or i["norm"] == resp))
+
+    n_part  = _cnt(live_gaps, resp="Partial")
+    n_na    = _cnt(live_gaps, resp="N/A")
+    n_unans = _cnt(live_gaps, resp="—")
+
+    # Group by domain preserving DOMAIN_MAP order
+    by_domain = OrderedDict()
+    for letter in DOMAIN_MAP.keys():
+        items = [i for i in live_gaps if i["domain"] == letter]
+        if items:
+            by_domain[letter] = {"name": DOMAIN_MAP.get(letter, letter), "items": items}
+
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 1 — Gap overview
+    # PAGE 1 — KPI summary + domain breakdown table
     # ══════════════════════════════════════════════════════════════════════════
-    story.append(_header_banner("Page 1 of 2 — Gap Overview"))
+    story.append(_header_banner())
     story.append(Spacer(1, 2.5*mm))
     story.append(_meta_row())
     story.append(Spacer(1, 3*mm))
 
-    # KPI strip
-    total_c  = sum(d["critical"] for d in gap_db)
-    total_h  = sum(d["high"]     for d in gap_db)
-    total_m  = sum(d["medium"]   for d in gap_db)
-    flagged  = sum(1 for d in gap_db if d["risk"] in ("Critical","High"))
-    n_dom    = len(gap_db)
-
+    # KPI strip — response type counts only
     def _kpi(val, label, color="#333333"):
         return Paragraph(
-            f'<font size="13" color="{color}"><b>{val}</b></font><br/>'
+            f'<font size="14" color="{color}"><b>{val}</b></font><br/>'
             f'<font size="7" color="#6c757d">{label}</font>',
-            _s(f"kpi{val}{label[:3]}", fontName="Helvetica", alignment=TA_CENTER, leading=17),
+            _s(f"kpi_{label[:5]}", fontName="Helvetica", alignment=TA_CENTER, leading=18),
         )
 
-    kpi_tbl = Table(
-        [[
-            _kpi(n_dom,   "Domains assessed"),
-            _kpi(total_c, "Critical controls", "#A32D2D"),
-            _kpi(total_h, "High controls",     "#854F0B"),
-            _kpi(total_m, "Medium controls",   "#185FA5"),
-            _kpi(flagged, "Domains flagged",   "#A32D2D"),
-        ]],
-        colWidths=[usable_w/5]*5,
-    )
+    kpi_tbl = Table([[
+        _kpi(len(live_gaps), "Total gaps"),
+        _kpi(n_part,  "Partial",    "#854F0B"),
+        _kpi(n_na,    "N/A",        "#5F5E5A"),
+        _kpi(n_unans, "Unanswered", "#888780"),
+    ]], colWidths=[usable_w / 4] * 4)
     kpi_tbl.setStyle(TableStyle([
         ("BACKGROUND",   (0,0),(-1,-1), colors.white),
         ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
         ("INNERGRID",    (0,0),(-1,-1), 0.5, C_BDR),
-        ("TOPPADDING",   (0,0),(-1,-1), 8),
-        ("BOTTOMPADDING",(0,0),(-1,-1), 8),
+        ("TOPPADDING",   (0,0),(-1,-1), 7),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 7),
         ("ALIGN",        (0,0),(-1,-1), "CENTER"),
         ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
     ]))
     story.append(kpi_tbl)
     story.append(Spacer(1, 3.5*mm))
 
-    # Domain gap table
-    story.append(Paragraph("SECURITY DOMAIN GAP OVERVIEW", s_sec))
-    col_w = [usable_w*0.04, usable_w*0.20, usable_w*0.07, usable_w*0.06, usable_w*0.09, usable_w*0.54]
-    tbl_data = [[
-        Paragraph("#",              s_small),
-        Paragraph("Domain",         s_small),
-        Paragraph("Critical",       s_small),
-        Paragraph("High",           s_small),
-        Paragraph("Rating",         s_small),
-        Paragraph("Priority gaps (top 2 critical/high items)", s_small),
+    # Domain summary table
+    story.append(Paragraph("GAP SUMMARY BY DOMAIN", s_sec))
+
+    col_w_sum = [
+        usable_w*0.05,  # ID
+        usable_w*0.27,  # Name
+        usable_w*0.08,  # Total
+        usable_w*0.08,  # Partial
+        usable_w*0.08,  # N/A
+        usable_w*0.08,  # Unanswered
+        usable_w*0.36,  # Top gap preview
+    ]
+    sum_rows = [[
+        Paragraph("#",           s_small),
+        Paragraph("Domain",      s_small),
+        Paragraph("Total",       s_small),
+        Paragraph("Partial",     s_small),
+        Paragraph("N/A",         s_small),
+        Paragraph("Unanswered",  s_small),
+        Paragraph("Top gap",     s_small),
     ]]
-    for i, d in enumerate(gap_db):
-        top_gaps = [g for g in d["gaps"] if g["tier"] in ("Critical","High")][:2]
-        gap_lines = "\n".join(
-            f'• {g["ref"]}: {g["text"][:80]}{"..." if len(g["text"])>80 else ""}'
-            for g in top_gaps
-        ) if top_gaps else "No critical/high gaps identified."
-        risk_fg = TIER_FG.get(d["risk"], C_GRY)
-        tbl_data.append([
-            Paragraph(d["id"],            s_ref),
-            Paragraph(d["name"],          s_body),
-            Paragraph(str(d["critical"]), _s(f"rc{i}", fontName="Helvetica-Bold", fontSize=8, textColor=C_RED, alignment=TA_CENTER)),
-            Paragraph(str(d["high"]),     _s(f"rh{i}", fontName="Helvetica-Bold", fontSize=8, textColor=C_AMB, alignment=TA_CENTER)),
-            Paragraph(d["risk"],          _s(f"rr{i}", fontName="Helvetica-Bold", fontSize=7, textColor=risk_fg, alignment=TA_CENTER)),
-            Paragraph(gap_lines,          _s(f"rg{i}", fontName="Helvetica", fontSize=7, textColor=colors.HexColor("#333"), leading=10)),
+
+    for letter, dom in by_domain.items():
+        di = dom["items"]
+        dtotal = len(di)
+        dp  = _cnt(di, resp="Partial")
+        dna = _cnt(di, resp="N/A")
+        dun = _cnt(di, resp="—")
+        top = next((i for i in di if i["tier"] in ("Critical","High")), di[0])
+        top_text = top["question"][:80] + ("..." if len(top["question"]) > 80 else "")
+
+        def _num(n, fg=C_GRY):
+            return Paragraph(str(n) if n else "—",
+                _s(f"n{letter}{n}", fontSize=7.5,
+                   fontName="Helvetica-Bold" if n else "Helvetica",
+                   textColor=fg if n else C_GRY, alignment=TA_CENTER))
+
+        sum_rows.append([
+            Paragraph(letter, s_ref),
+            Paragraph(dom["name"], s_body),
+            _num(dtotal, C_GRY),
+            _num(dp,     C_AMB),
+            _num(dna,    C_GRY),
+            _num(dun,    C_GRY),
+            Paragraph(top_text, _s(f"tg{letter}", fontSize=6.5, fontName="Helvetica",
+                                   textColor=colors.HexColor("#444"), leading=9)),
         ])
 
-    dom_tbl = Table(tbl_data, colWidths=col_w, repeatRows=1)
-    ts = [
+    sum_tbl = Table(sum_rows, colWidths=col_w_sum, repeatRows=1)
+    sum_ts = [
         ("BACKGROUND",   (0,0),(-1,0),  C_TBL_BG),
         ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
         ("INNERGRID",    (0,0),(-1,-1), 0.3, C_BDR),
-        ("TOPPADDING",   (0,0),(-1,-1), 4),
-        ("BOTTOMPADDING",(0,0),(-1,-1), 4),
-        ("LEFTPADDING",  (0,0),(-1,-1), 5),
-        ("RIGHTPADDING", (0,0),(-1,-1), 5),
+        ("TOPPADDING",   (0,0),(-1,-1), 3),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+        ("LEFTPADDING",  (0,0),(-1,-1), 4),
+        ("RIGHTPADDING", (0,0),(-1,-1), 4),
         ("VALIGN",       (0,0),(-1,-1), "TOP"),
-        ("ALIGN",        (2,1),(4,-1),  "CENTER"),
+        ("ALIGN",        (2,1),(5,-1),  "CENTER"),
     ]
-    for r in range(1, len(tbl_data)):
+    for r in range(1, len(sum_rows)):
         if r % 2 == 0:
-            ts.append(("BACKGROUND", (0,r),(-1,r), colors.HexColor("#fafafa")))
-    dom_tbl.setStyle(TableStyle(ts))
-    story.append(dom_tbl)
+            sum_ts.append(("BACKGROUND", (0,r),(-1,r), colors.HexColor("#fafafa")))
+    sum_tbl.setStyle(TableStyle(sum_ts))
+    story.append(sum_tbl)
     story.append(Spacer(1, 3*mm))
 
     # Expectations note
-    note_tbl = Table(
-        [[Paragraph(
-            "<b>Vendor expectations:</b> All Critical-tier control gaps must be remediated or a documented "
-            "compensating control provided before onboarding can proceed. High-tier gaps require a remediation "
-            "plan with committed timelines submitted within 30 days. Evidence must be provided per the TPCRA v3.0 "
-            "Evidence Checklist. All information provided is treated as confidential and used solely for "
-            "third-party risk assessment purposes.",
-            s_note,
-        )]],
-        colWidths=[usable_w],
-    )
-    note_tbl.setStyle(TableStyle([
-        ("BACKGROUND",   (0,0),(-1,-1), C_REC_BG),
-        ("BOX",          (0,0),(-1,-1), 0.5, C_REC_BD),
-        ("TOPPADDING",   (0,0),(-1,-1), 7),
-        ("BOTTOMPADDING",(0,0),(-1,-1), 7),
-        ("LEFTPADDING",  (0,0),(-1,-1), 9),
-        ("RIGHTPADDING", (0,0),(-1,-1), 9),
-    ]))
-    story.append(note_tbl)
-    story.append(Spacer(1, 3*mm))
-    story.append(_footer_row("Page 1 of 2"))
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — NIST-grounded recommendations per domain
-    # ══════════════════════════════════════════════════════════════════════════
-    from reportlab.platypus import PageBreak
-    story.append(PageBreak())
-
-    story.append(_header_banner("Page 2 of 2 — Recommendations (NIST-grounded)"))
-    story.append(Spacer(1, 2.5*mm))
-    story.append(_meta_row())
-    story.append(Spacer(1, 3*mm))
-
-    intro_tbl = Table(
-        [[Paragraph(
-            "<b>How to use this page:</b> Each domain below lists actionable recommendations with explicit "
-            "references to NIST SP 800-53r5, NIST SP 800-161r1 (C-SCRM), NIST CSF 2.0, and/or NIST AI RMF 1.0. "
-            "Vendors should address all Critical-rated domains as a priority. Each recommendation maps to "
-            "specific control families to guide implementation and evidence collection.",
-            s_note,
-        )]],
-        colWidths=[usable_w],
-    )
-    intro_tbl.setStyle(TableStyle([
+    story.append(Table([[Paragraph(
+        "<b>Vendor expectations:</b> All Critical-tier gaps must be remediated or a documented compensating "
+        "control provided before onboarding can proceed. High-tier gaps require a remediation plan with "
+        "committed timelines within 30 days. Evidence must be submitted per the TPCRA v3.0 Evidence Checklist. "
+        "This report is confidential and used solely for third-party risk assessment purposes.",
+        s_note,
+    )]], colWidths=[usable_w], style=TableStyle([
         ("BACKGROUND",   (0,0),(-1,-1), C_REC_BG),
         ("BOX",          (0,0),(-1,-1), 0.5, C_REC_BD),
         ("TOPPADDING",   (0,0),(-1,-1), 6),
         ("BOTTOMPADDING",(0,0),(-1,-1), 6),
         ("LEFTPADDING",  (0,0),(-1,-1), 9),
         ("RIGHTPADDING", (0,0),(-1,-1), 9),
-    ]))
-    story.append(intro_tbl)
+    ])))
     story.append(Spacer(1, 3*mm))
+    story.append(_footer_row())
 
-    # Two-column layout for domain recommendations
-    HALF = (usable_w - 3*mm) / 2
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 2+ — Detailed gap listing per domain
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(PageBreak())
+    story.append(_header_banner())
+    story.append(Spacer(1, 2.5*mm))
+    story.append(_meta_row())
+    story.append(Spacer(1, 3.5*mm))
+    story.append(Paragraph("DETAILED GAP LISTING BY DOMAIN", s_sec))
+    story.append(Spacer(1, 1.5*mm))
 
-    def _domain_rec_cell(d, rec_data):
-        risk_fg = TIER_FG.get(d["risk"], C_GRY)
-        # Domain header
-        hdr = Table(
-            [[
-                Paragraph(f"{d['id']} — {rec_data['title']}", s_dom_hd),
-                Paragraph(d["risk"], _s(f"dh{d['id']}", fontSize=7.5, fontName="Helvetica-Bold",
-                                        textColor=colors.white, alignment=TA_RIGHT, leading=12)),
-            ]],
-            colWidths=[HALF*0.78, HALF*0.22],
-        )
-        hdr_bg = C_RED if d["risk"] == "Critical" else (C_AMB if d["risk"] == "High" else C_BLU)
-        hdr.setStyle(TableStyle([
-            ("BACKGROUND",   (0,0),(-1,-1), hdr_bg),
-            ("TOPPADDING",   (0,0),(-1,-1), 4),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 4),
-            ("LEFTPADDING",  (0,0),(-1,-1), 6),
-            ("RIGHTPADDING", (0,0),(-1,-1), 6),
-            ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
+    col_w_det = [usable_w*0.07, usable_w*0.09, usable_w*0.09, usable_w*0.75]
+
+    for letter, dom in by_domain.items():
+        ditems_sorted = sorted(dom["items"], key=lambda x: (
+            {"Critical":0,"High":1,"Medium":2,"Low":3,"":4}.get(x["tier"], 4), x["key"]
+        ))
+        dc = _cnt(dom["items"], tier="Critical")
+        dh = _cnt(dom["items"], tier="High")
+        dm2 = _cnt(dom["items"], tier="Medium")
+        dl = _cnt(dom["items"], tier="Low")
+
+        # Domain section header
+        dom_hdr = Table([[Paragraph(
+            f"{letter}  —  {dom['name']}     "
+            f"Critical: {dc}   High: {dh}   Medium: {dm2}   Low: {dl}   "
+            f"Total: {len(dom['items'])}",
+            _s(f"dh{letter}", fontSize=8, fontName="Helvetica-Bold",
+               textColor=colors.white, leading=11),
+        )]], colWidths=[usable_w])
+        dom_hdr.setStyle(TableStyle([
+            ("BACKGROUND",   (0,0),(-1,-1), colors.HexColor("#2d3250")),
+            ("TOPPADDING",   (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 5),
+            ("LEFTPADDING",  (0,0),(-1,-1), 9),
+            ("RIGHTPADDING", (0,0),(-1,-1), 9),
         ]))
+        story.append(dom_hdr)
 
-        # NIST ref tag
-        nist_tag = Table(
-            [[Paragraph(rec_data["nist_refs"], s_nist)]],
-            colWidths=[HALF],
-        )
-        nist_tag.setStyle(TableStyle([
-            ("BACKGROUND",   (0,0),(-1,-1), colors.HexColor("#EEF2FF")),
-            ("TOPPADDING",   (0,0),(-1,-1), 3),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
-            ("LEFTPADDING",  (0,0),(-1,-1), 6),
-            ("RIGHTPADDING", (0,0),(-1,-1), 6),
-        ]))
+        det_rows = [[
+            Paragraph("Ref",      s_small),
+            Paragraph("Tier",     s_small),
+            Paragraph("Response", s_small),
+            Paragraph("Control / Question", s_small),
+        ]]
+        for item in ditems_sorted:
+            tier_fg = TIER_FG.get(item["tier"], C_GRY)
+            tier_bg = TIER_BG.get(item["tier"], colors.HexColor("#F1EFE8"))
+            resp_fg = RESP_FG.get(item["norm"], C_GRY)
+            resp_bg = RESP_BG.get(item["norm"], colors.HexColor("#F1EFE8"))
+            resp_label = item["norm"] if item["norm"] != "—" else "Unanswered"
 
-        # Recommendation rows
-        rec_rows = []
-        for j, (heading, detail) in enumerate(rec_data["recs"]):
-            num_para = Paragraph(str(j+1), _s(f"rn{d['id']}{j}", fontSize=7.5, fontName="Helvetica-Bold",
-                                               textColor=colors.white, alignment=TA_CENTER))
-            num_cell = Table([[num_para]], colWidths=[5*mm])
-            num_cell.setStyle(TableStyle([
-                ("BACKGROUND",   (0,0),(-1,-1), hdr_bg),
-                ("TOPPADDING",   (0,0),(-1,-1), 2),
-                ("BOTTOMPADDING",(0,0),(-1,-1), 2),
-                ("LEFTPADDING",  (0,0),(-1,-1), 0),
-                ("RIGHTPADDING", (0,0),(-1,-1), 0),
-                ("VALIGN",       (0,0),(-1,-1), "TOP"),
-            ]))
-            text_cell = Table(
-                [[Paragraph(heading, s_rec_hd)],
-                 [Paragraph(detail,  s_rec_bod)]],
-                colWidths=[HALF - 5*mm - 8],
-            )
-            text_cell.setStyle(TableStyle([
+            q_parts = [Paragraph(item["question"], s_q)]
+            if item.get("other"):
+                q_parts.append(Paragraph(f"Remarks: {item['other']}", s_rmk))
+            q_cell = Table([[p] for p in q_parts], colWidths=[col_w_det[3]])
+            q_cell.setStyle(TableStyle([
                 ("TOPPADDING",   (0,0),(-1,-1), 1),
                 ("BOTTOMPADDING",(0,0),(-1,-1), 1),
-                ("LEFTPADDING",  (0,0),(-1,-1), 4),
-                ("RIGHTPADDING", (0,0),(-1,-1), 2),
+                ("LEFTPADDING",  (0,0),(-1,-1), 0),
+                ("RIGHTPADDING", (0,0),(-1,-1), 0),
             ]))
-            row_tbl = Table([[num_cell, text_cell]], colWidths=[5*mm, HALF - 5*mm])
-            row_tbl.setStyle(TableStyle([
-                ("TOPPADDING",   (0,0),(-1,-1), 2),
-                ("BOTTOMPADDING",(0,0),(-1,-1), 2),
-                ("LEFTPADDING",  (0,0),(-1,-1), 3),
-                ("RIGHTPADDING", (0,0),(-1,-1), 3),
-                ("VALIGN",       (0,0),(-1,-1), "TOP"),
-                ("LINEBELOW",    (0,0),(-1,-1), 0.3, C_BDR),
-            ]))
-            rec_rows.append(row_tbl)
+            det_rows.append([
+                Paragraph(item["key"],
+                          _s(f"ref{item['key']}", fontSize=7, fontName="Helvetica-Bold", textColor=C_GRY)),
+                Paragraph(item["tier"] if item["tier"] else "—",
+                          _s(f"tf{item['key']}", fontSize=7, fontName="Helvetica-Bold",
+                             textColor=tier_fg, alignment=TA_CENTER)),
+                Paragraph(resp_label,
+                          _s(f"rf{item['key']}", fontSize=7, fontName="Helvetica-Bold",
+                             textColor=resp_fg, alignment=TA_CENTER)),
+                q_cell,
+            ])
 
-        # Wrap all into a card
-        card_content = [hdr, nist_tag] + rec_rows
-        card = Table([[item] for item in card_content], colWidths=[HALF])
-        card.setStyle(TableStyle([
+        det_tbl = Table(det_rows, colWidths=col_w_det, repeatRows=1)
+        det_ts = [
+            ("BACKGROUND",   (0,0),(-1,0),  C_TBL_BG),
             ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
-            ("TOPPADDING",   (0,0),(-1,-1), 0),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 0),
-            ("LEFTPADDING",  (0,0),(-1,-1), 0),
-            ("RIGHTPADDING", (0,0),(-1,-1), 0),
-        ]))
-        return card
-
-    # Lay out domains in 2-column pairs
-    domains_with_recs = [(d, NIST_RECS[d["id"]]) for d in gap_db if d["id"] in NIST_RECS]
-    for i in range(0, len(domains_with_recs), 2):
-        left_d,  left_r  = domains_with_recs[i]
-        if i+1 < len(domains_with_recs):
-            right_d, right_r = domains_with_recs[i+1]
-            row = Table(
-                [[_domain_rec_cell(left_d, left_r), _domain_rec_cell(right_d, right_r)]],
-                colWidths=[HALF, HALF],
-                hAlign="LEFT",
-            )
-        else:
-            # Odd domain — full width spanning both columns
-            row = Table(
-                [[_domain_rec_cell(left_d, left_r), ""]],
-                colWidths=[HALF, HALF],
-                hAlign="LEFT",
-            )
-        row.setStyle(TableStyle([
-            ("TOPPADDING",   (0,0),(-1,-1), 2),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 2),
-            ("LEFTPADDING",  (0,0),(-1,-1), 0),
-            ("RIGHTPADDING", (0,0),(-1,-1), 0),
+            ("INNERGRID",    (0,0),(-1,-1), 0.3, C_BDR),
+            ("TOPPADDING",   (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+            ("LEFTPADDING",  (0,0),(-1,-1), 4),
+            ("RIGHTPADDING", (0,0),(-1,-1), 4),
             ("VALIGN",       (0,0),(-1,-1), "TOP"),
-            ("COLPADDING",   (0,0),(-1,-1), 1.5*mm),
-        ]))
-        story.append(row)
-        story.append(Spacer(1, 1.5*mm))
+            ("ALIGN",        (1,1),(2,-1),  "CENTER"),
+        ]
+        for r_idx, item in enumerate(ditems_sorted, 1):
+            det_ts.append(("BACKGROUND", (1,r_idx),(1,r_idx), TIER_BG.get(item["tier"], colors.HexColor("#F1EFE8"))))
+            det_ts.append(("BACKGROUND", (2,r_idx),(2,r_idx), RESP_BG.get(item["norm"], colors.HexColor("#F1EFE8"))))
+            if r_idx % 2 == 0:
+                det_ts.append(("BACKGROUND", (0,r_idx),(0,r_idx), colors.HexColor("#fafafa")))
+                det_ts.append(("BACKGROUND", (3,r_idx),(3,r_idx), colors.HexColor("#fafafa")))
+        det_tbl.setStyle(TableStyle(det_ts))
+        story.append(det_tbl)
 
-    story.append(Spacer(1, 2*mm))
-    story.append(_footer_row("Page 2 of 2"))
+        # ── Per-domain recommendations from GAP_DB ─────────────────────────────
+        domain_recs = rec_lookup.get(letter, [])
+        if domain_recs:
+            rec_hdr_tbl = Table(
+                [[Paragraph("Recommendations", s_rec_hd)]],
+                colWidths=[usable_w],
+            )
+            rec_hdr_tbl.setStyle(TableStyle([
+                ("BACKGROUND",   (0,0),(-1,-1), C_REC_BG),
+                ("LEFTPADDING",  (0,0),(-1,-1), 9),
+                ("RIGHTPADDING", (0,0),(-1,-1), 9),
+                ("TOPPADDING",   (0,0),(-1,-1), 4),
+                ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+                ("LINEABOVE",    (0,0),(-1,-1), 0.5, C_REC_BD),
+                ("LINEBELOW",    (0,0),(-1,-1), 0.5, C_REC_BD),
+            ]))
+            story.append(rec_hdr_tbl)
 
+            rec_rows = []
+            for j, rec_text in enumerate(domain_recs, 1):
+                bullet = Paragraph(str(j), _s(f"bn{letter}{j}", fontSize=7,
+                                               fontName="Helvetica-Bold",
+                                               textColor=colors.HexColor("#1a1a2e"),
+                                               alignment=TA_CENTER))
+                text   = Paragraph(rec_text, s_rec)
+                rec_rows.append([bullet, text])
+
+            rec_tbl = Table(rec_rows, colWidths=[usable_w*0.04, usable_w*0.96])
+            rec_tbl.setStyle(TableStyle([
+                ("BACKGROUND",   (0,0),(-1,-1), C_REC_BG),
+                ("BOX",          (0,0),(-1,-1), 0.5, C_REC_BD),
+                ("LINEBELOW",    (0,0),(-1,-1), 0.3, C_BDR),
+                ("TOPPADDING",   (0,0),(-1,-1), 3),
+                ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+                ("LEFTPADDING",  (0,0),(-1,-1), 4),
+                ("RIGHTPADDING", (0,0),(-1,-1), 6),
+                ("VALIGN",       (0,0),(-1,-1), "TOP"),
+            ]))
+            story.append(rec_tbl)
+
+        story.append(Spacer(1, 4*mm))
+
+    story.append(_footer_row())
     doc.build(story)
     return buf.getvalue()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN APP
@@ -1857,9 +1738,11 @@ with tab_gap_summary:
         )
     with ex3:
         pdf_bytes = generate_vendor_pdf(
-            GAP_DB,
+            live_gaps=filtered_gaps,
             vendor_name=contact.get("vendor", ""),
             assessment_date=datetime.date.today().strftime("%d %B %Y"),
+            total_questions=len(p2_items),
+            gap_db=GAP_DB,
         )
         st.download_button(
             "⬇ Download vendor report PDF",

@@ -1094,6 +1094,10 @@ contact  = extract_contact(p1_data.get("items", []))
 p2_items = p2_data["items"]
 domains  = p2_data["domains"]
 
+# ── Overall score (used in header and Overview tab) ────────────────────────────
+overall_score = compliance_score(p2_items)
+overall_rating_label, overall_rating_color = risk_rating(overall_score)
+
 # ── Header ─────────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([4, 1])
 with h1:
@@ -1105,6 +1109,17 @@ with h1:
         st.caption(f"Engagement: {contact['engagement']}")
 with h2:
     st.caption(p2_data.get("title", "TPCRA v3.0"))
+    st.markdown(
+        f'<div style="text-align:right;margin-top:4px">'
+        f'<div style="font-size:11px;color:#6c757d;font-weight:600;'
+        f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px">Compliance score</div>'
+        f'<div style="font-size:28px;font-weight:700;color:{overall_rating_color};line-height:1.1">'
+        f'{overall_score}%</div>'
+        f'<div style="font-size:12px;color:{overall_rating_color};font-weight:600">'
+        f'{overall_rating_label}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Response counts (used by Overview tab charts) ──────────────────────────────
 n_yes  = sum(1 for i in p2_items if i["norm"] == "Yes")
@@ -1210,21 +1225,17 @@ with tab_domain:
         dom = domains[chosen_letter]
         items = dom["items"]
 
-        sc = compliance_score(items)
-        rl, rc = risk_rating(sc)
         n_y = sum(1 for i in items if i["norm"] == "Yes")
         n_n = sum(1 for i in items if i["norm"] == "No")
         n_p = sum(1 for i in items if i["norm"] == "Partial")
         n_a = sum(1 for i in items if i["norm"] == "N/A")
 
-        dm1, dm2, dm3, dm4, dm5, dm6 = st.columns(6)
-        dm1.metric("Questions", len(items))
-        dm2.metric("✅ Yes",    n_y)
-        dm3.metric("❌ No",     n_n)
-        dm4.metric("⚠️ Partial", n_p)
-        dm5.metric("➖ N/A",    n_a)
-        dm6.metric("Score", f"{sc}%", delta=rl,
-            delta_color="normal" if sc >= 70 else ("off" if sc >= 50 else "inverse"))
+        dm1, dm2, dm3, dm4, dm5 = st.columns(5)
+        dm1.metric("Questions",   len(items))
+        dm2.metric("✅ Yes",      n_y)
+        dm3.metric("❌ No",       n_n)
+        dm4.metric("⚠️ Partial",  n_p)
+        dm5.metric("➖ N/A",      n_a)
 
         st.divider()
 

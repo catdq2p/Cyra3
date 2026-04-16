@@ -1108,30 +1108,6 @@ with h2:
 
 st.divider()
 
-# ── KPI metrics ────────────────────────────────────────────────────────────────
-answered = [i for i in p2_items if i["norm"] in ("Yes", "No", "Partial", "N/A")]
-unanswered = [i for i in p2_items if i["norm"] == "—"]
-n_yes  = sum(1 for i in p2_items if i["norm"] == "Yes")
-n_no   = sum(1 for i in p2_items if i["norm"] == "No")
-n_part = sum(1 for i in p2_items if i["norm"] == "Partial")
-n_na   = sum(1 for i in p2_items if i["norm"] == "N/A")
-n_unans = len(unanswered)
-score  = compliance_score(p2_items)
-rating_label, rating_color = risk_rating(score)
-
-k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-k1.metric("Total questions", len(p2_items))
-k2.metric("✅ Yes",           n_yes)
-k3.metric("❌ No",            n_no)
-k4.metric("⚠️ Partial",       n_part)
-k5.metric("➖ N/A",           n_na)
-k6.metric("⬜ Unanswered",    n_unans)
-k7.metric("Compliance score",  f"{score}%",
-    delta=rating_label,
-    delta_color="normal" if score >= 70 else ("off" if score >= 50 else "inverse"),
-)
-st.divider()
-
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tab_overview, tab_domain, tab_evidence, tab_part1, tab_gap_summary = st.tabs([
     "Overview", "By domain", "Evidence checklist", "Engagement info", "Gap summary"

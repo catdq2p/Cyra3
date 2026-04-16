@@ -5,6 +5,12 @@ import plotly.graph_objects as go
 import io
 import datetime
 from openpyxl import load_workbook
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -620,6 +626,227 @@ def make_sample_excel() -> bytes:
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df = pd.DataFrame(p2_rows)
         df.to_excel(writer, index=False, header=False, sheet_name="Part 2")
+    return buf.getvalue()
+
+
+# ── PDF generation ────────────────────────────────────────────────────────────
+def generate_vendor_pdf(gap_db: list, vendor_name: str = "", assessment_date: str = "") -> bytes:
+    """Generate a 1-page vendor-facing gap summary PDF using ReportLab."""
+    buf = io.BytesIO()
+    PAGE_W, PAGE_H = A4
+    MARGIN = 16 * mm
+    usable_w = PAGE_W - 2 * MARGIN
+
+    if not assessment_date:
+        assessment_date = datetime.date.today().strftime("%d %B %Y")
+    vendor_line = vendor_name if vendor_name else "—"
+
+    # ── colour palette ────────────────────────────────────────────────────────
+    C_RED    = colors.HexColor("#A32D2D")
+    C_RED_BG = colors.HexColor("#FCEBEB")
+    C_AMB    = colors.HexColor("#854F0B")
+    C_AMB_BG = colors.HexColor("#FAEEDA")
+    C_BLU    = colors.HexColor("#185FA5")
+    C_BLU_BG = colors.HexColor("#E6F1FB")
+    C_GRY    = colors.HexColor("#6c757d")
+    C_BDR    = colors.HexColor("#e9ecef")
+    C_HDR_BG = colors.HexColor("#1a1a2e")
+    C_TBL_BG = colors.HexColor("#f8f9fa")
+    TIER_FG  = {"Critical": C_RED, "High": C_AMB, "Medium": C_BLU}
+
+    def _s(name, **kw):
+        s = ParagraphStyle(name)
+        for k, v in kw.items():
+            setattr(s, k, v)
+        return s
+
+    s_title  = _s("title",  fontSize=13, fontName="Helvetica-Bold",  textColor=colors.white,           alignment=TA_LEFT, leading=17)
+    s_body   = _s("body",   fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#333"), leading=11)
+    s_small  = _s("small",  fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                  leading=10)
+    s_ref    = _s("ref",    fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY)
+    s_sec    = _s("sec",    fontSize=7.5,fontName="Helvetica-Bold",   textColor=C_GRY,                  spaceBefore=4, spaceAfter=2)
+    s_note   = _s("note",   fontSize=7.5,fontName="Helvetica-Oblique",textColor=C_GRY,                  leading=11)
+    s_footer = _s("footer", fontSize=7,  fontName="Helvetica",        textColor=C_GRY,                  alignment=TA_CENTER)
+    s_ctr    = _s("ctr",    fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#333"), alignment=TA_CENTER)
+
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN,
+        topMargin=MARGIN,  bottomMargin=MARGIN,
+    )
+    story = []
+
+    # ── header banner ──────────────────────────────────────────────────────────
+    hdr_tbl = Table(
+        [[Paragraph("Third-Party Cyber Risk Assessment  —  Gap Summary Report", s_title)]],
+        colWidths=[usable_w],
+    )
+    hdr_tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0),(-1,-1), C_HDR_BG),
+        ("TOPPADDING",   (0,0),(-1,-1), 11),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 11),
+        ("LEFTPADDING",  (0,0),(-1,-1), 12),
+        ("RIGHTPADDING", (0,0),(-1,-1), 12),
+    ]))
+    story.append(hdr_tbl)
+    story.append(Spacer(1, 2.5*mm))
+
+    # ── meta row ───────────────────────────────────────────────────────────────
+    meta_tbl = Table(
+        [[
+            Paragraph(f"<b>Vendor:</b> {vendor_line}", s_body),
+            Paragraph(f"<b>Assessment date:</b> {assessment_date}", s_body),
+            Paragraph("<b>Framework:</b> TPCRA v3.0", s_body),
+            Paragraph("<b>Classification:</b> Confidential", s_body),
+        ]],
+        colWidths=[usable_w*0.30, usable_w*0.26, usable_w*0.22, usable_w*0.22],
+    )
+    meta_tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0),(-1,-1), C_TBL_BG),
+        ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
+        ("TOPPADDING",   (0,0),(-1,-1), 6),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 6),
+        ("LEFTPADDING",  (0,0),(-1,-1), 8),
+        ("RIGHTPADDING", (0,0),(-1,-1), 8),
+        ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(meta_tbl)
+    story.append(Spacer(1, 3*mm))
+
+    # ── KPI strip ─────────────────────────────────────────────────────────────
+    total_c  = sum(d["critical"] for d in gap_db)
+    total_h  = sum(d["high"]     for d in gap_db)
+    total_m  = sum(d["medium"]   for d in gap_db)
+    flagged  = sum(1 for d in gap_db if d["risk"] in ("Critical","High"))
+    n_dom    = len(gap_db)
+
+    def _kpi(val, label, color="#333333"):
+        return Paragraph(
+            f'<font size="13" color="{color}"><b>{val}</b></font><br/>'
+            f'<font size="7" color="#6c757d">{label}</font>',
+            _s(f"kpi{val}", fontName="Helvetica", alignment=TA_CENTER, leading=17),
+        )
+
+    kpi_tbl = Table(
+        [[
+            _kpi(n_dom,    "Domains assessed"),
+            _kpi(total_c,  "Critical controls", "#A32D2D"),
+            _kpi(total_h,  "High controls",     "#854F0B"),
+            _kpi(total_m,  "Medium controls",   "#185FA5"),
+            _kpi(flagged,  "Domains flagged",   "#A32D2D"),
+        ]],
+        colWidths=[usable_w/5]*5,
+    )
+    kpi_tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0),(-1,-1), colors.white),
+        ("BOX",          (0,0),(-1,-1), 0.5, C_BDR),
+        ("INNERGRID",    (0,0),(-1,-1), 0.5, C_BDR),
+        ("TOPPADDING",   (0,0),(-1,-1), 8),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 8),
+        ("ALIGN",        (0,0),(-1,-1), "CENTER"),
+        ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(kpi_tbl)
+    story.append(Spacer(1, 3.5*mm))
+
+    # ── domain gap table ───────────────────────────────────────────────────────
+    story.append(Paragraph("SECURITY DOMAIN GAP OVERVIEW", s_sec))
+
+    col_w = [
+        usable_w*0.04,   # ID
+        usable_w*0.20,   # Domain name
+        usable_w*0.07,   # Critical
+        usable_w*0.06,   # High
+        usable_w*0.09,   # Rating
+        usable_w*0.54,   # Priority gaps
+    ]
+    hdr_row = [
+        Paragraph("#",              s_small),
+        Paragraph("Domain",         s_small),
+        Paragraph("Critical",       s_small),
+        Paragraph("High",           s_small),
+        Paragraph("Rating",         s_small),
+        Paragraph("Priority gaps (top 2 critical/high items)", s_small),
+    ]
+    tbl_data = [hdr_row]
+
+    for i, d in enumerate(gap_db):
+        top_gaps = [g for g in d["gaps"] if g["tier"] in ("Critical","High")][:2]
+        if top_gaps:
+            gap_lines = "\n".join(
+                f'• {g["ref"]}: {g["text"][:80]}{"…" if len(g["text"])>80 else ""}'
+                for g in top_gaps
+            )
+        else:
+            gap_lines = "No critical/high gaps identified."
+        risk_fg = TIER_FG.get(d["risk"], C_GRY)
+        tbl_data.append([
+            Paragraph(d["id"],         s_ref),
+            Paragraph(d["name"],       s_body),
+            Paragraph(str(d["critical"]), _s(f"rc{i}", fontName="Helvetica-Bold", fontSize=8, textColor=C_RED,  alignment=TA_CENTER)),
+            Paragraph(str(d["high"]),     _s(f"rh{i}", fontName="Helvetica-Bold", fontSize=8, textColor=C_AMB,  alignment=TA_CENTER)),
+            Paragraph(d["risk"],          _s(f"rr{i}", fontName="Helvetica-Bold", fontSize=7, textColor=risk_fg, alignment=TA_CENTER)),
+            Paragraph(gap_lines,          _s(f"rg{i}", fontName="Helvetica",      fontSize=7, textColor=colors.HexColor("#333"), leading=10)),
+        ])
+
+    dom_tbl = Table(tbl_data, colWidths=col_w, repeatRows=1)
+    tbl_style = [
+        ("BACKGROUND",   (0,0),(-1,0),   C_TBL_BG),
+        ("FONTNAME",     (0,0),(-1,0),   "Helvetica-Bold"),
+        ("BOX",          (0,0),(-1,-1),  0.5, C_BDR),
+        ("INNERGRID",    (0,0),(-1,-1),  0.3, C_BDR),
+        ("TOPPADDING",   (0,0),(-1,-1),  4),
+        ("BOTTOMPADDING",(0,0),(-1,-1),  4),
+        ("LEFTPADDING",  (0,0),(-1,-1),  5),
+        ("RIGHTPADDING", (0,0),(-1,-1),  5),
+        ("VALIGN",       (0,0),(-1,-1),  "TOP"),
+        ("ALIGN",        (2,1),(4,-1),   "CENTER"),
+    ]
+    for r in range(1, len(tbl_data)):
+        if r % 2 == 0:
+            tbl_style.append(("BACKGROUND", (0,r),(-1,r), colors.HexColor("#fafafa")))
+    dom_tbl.setStyle(TableStyle(tbl_style))
+    story.append(dom_tbl)
+    story.append(Spacer(1, 3*mm))
+
+    # ── vendor expectations note ───────────────────────────────────────────────
+    note_tbl = Table(
+        [[Paragraph(
+            "<b>Vendor expectations:</b> All Critical-tier control gaps must be remediated or a documented "
+            "compensating control provided before onboarding can proceed. High-tier gaps require a remediation "
+            "plan with committed timelines submitted within 30 days. Evidence must be provided per the TPCRA v3.0 "
+            "Evidence Checklist. All information provided is treated as confidential and used solely for "
+            "third-party risk assessment purposes.",
+            s_note,
+        )]],
+        colWidths=[usable_w],
+    )
+    note_tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0),(-1,-1), colors.HexColor("#EEF2FF")),
+        ("BOX",          (0,0),(-1,-1), 0.5, colors.HexColor("#c7d2fe")),
+        ("TOPPADDING",   (0,0),(-1,-1), 7),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 7),
+        ("LEFTPADDING",  (0,0),(-1,-1), 9),
+        ("RIGHTPADDING", (0,0),(-1,-1), 9),
+    ]))
+    story.append(note_tbl)
+    story.append(Spacer(1, 3*mm))
+
+    # ── footer ─────────────────────────────────────────────────────────────────
+    footer_tbl = Table(
+        [[
+            Paragraph("TPCRA v3.0  |  For vendor assessment use only  |  Internal — Confidential", s_footer),
+            Paragraph(f"Generated: {assessment_date}", _s("fr", fontSize=7, fontName="Helvetica", textColor=C_GRY, alignment=TA_RIGHT)),
+        ]],
+        colWidths=[usable_w*0.72, usable_w*0.28],
+    )
+    footer_tbl.setStyle(TableStyle([
+        ("TOPPADDING",   (0,0),(-1,-1), 5),
+        ("LINEABOVE",    (0,0),(-1,-1), 0.5, C_BDR),
+    ]))
+    story.append(footer_tbl)
+
+    doc.build(story)
     return buf.getvalue()
 
 
@@ -1300,7 +1527,7 @@ with tab_gap_summary:
             })
     all_gap_df = pd.DataFrame(all_gap_rows)
 
-    ex1, ex2, _ = st.columns([1, 1, 3])
+    ex1, ex2, ex3 = st.columns([1, 1, 1])
     with ex1:
         st.download_button(
             "⬇ Export all gaps CSV",
@@ -1319,6 +1546,20 @@ with tab_gap_summary:
             file_name="tpcra_gap_summary.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+        )
+    with ex3:
+        pdf_bytes = generate_vendor_pdf(
+            GAP_DB,
+            vendor_name=contact.get("vendor", ""),
+            assessment_date=datetime.date.today().strftime("%d %B %Y"),
+        )
+        st.download_button(
+            "⬇ Download vendor report PDF",
+            data=pdf_bytes,
+            file_name="tpcra_vendor_gap_report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
         )
 
 

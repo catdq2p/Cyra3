@@ -436,14 +436,18 @@ def parse_part1(wb) -> dict:
             meta["sections"].setdefault(current_section, [])
             continue
 
+        # Column header row — skip
+        if key == "#":
+            continue
+
         # Data row
         if question and str(question).strip():
             item = {
                 "key":      str(key).strip() if key else "",
                 "section":  current_section,
                 "question": str(question).strip(),
-                "response": str(response).strip() if response else "",
-                "other":    str(row[3]).strip() if len(row) > 3 and row[3] else "",
+                "response": str(response).strip() if response is not None else "",
+                "other":    str(row[3]).strip() if len(row) > 3 and row[3] is not None else "",
                 "tier":     str(row[4]).strip() if len(row) > 4 and row[4] and str(row[4]) != "—" else "",
             }
             meta["items"].append(item)
@@ -565,18 +569,23 @@ def extract_contact(p1_items: list) -> dict:
     """Pull key contact fields from Part 1 items."""
     contact = {"vendor": "", "rep": "", "email": "", "engagement": ""}
     for item in p1_items:
-        q = item["question"].lower()
+        # Skip column header row
+        if item.get("key") == "#":
+            continue
+        # Normalise question text — strip trailing asterisks and whitespace
+        q = item["question"].lower().rstrip(" *")
         r = item["response"]
-        if not r or r in ("None", "—"):
+        # Skip empty or placeholder values (case-insensitive)
+        if not r or r.strip().lower() in ("", "none", "—", "response", "n/a", "not applicable"):
             continue
         if "company name" in q:
-            contact["vendor"] = r
+            contact["vendor"] = r.strip()
         elif "authorized representative" in q and "email" not in q:
-            contact["rep"] = r
+            contact["rep"] = r.strip()
         elif "email" in q and "representative" in q:
-            contact["email"] = r
+            contact["email"] = r.strip()
         elif "description of the engagement" in q:
-            contact["engagement"] = r[:120] + "…" if len(r) > 120 else r
+            contact["engagement"] = (r[:120] + "…" if len(r) > 120 else r).strip()
     return contact
 
 
@@ -646,7 +655,7 @@ def generate_vendor_pdf(
 
     if not assessment_date:
         assessment_date = datetime.date.today().strftime("%d %B %Y")
-    vendor_line = vendor_name if vendor_name else "—"
+    vendor_line = vendor_name.strip() if vendor_name and vendor_name.strip() else "Not provided (complete Section 1 of Part 1)"
 
     # ── colour palette ─────────────────────────────────────────────────────────
     C_RED    = colors.HexColor("#A32D2D")

@@ -1467,15 +1467,6 @@ with tab_gap_summary:
         )
 
     total_gaps    = len(live_gaps)
-    n_crit_total  = _count(live_gaps, tier="Critical")
-    n_high_total  = _count(live_gaps, tier="High")
-    n_med_total   = _count(live_gaps, tier="Medium")
-    n_low_total   = _count(live_gaps, tier="Low")
-
-    n_no_total    = _count(live_gaps, resp="No")
-    n_na_total    = _count(live_gaps, resp="N/A")
-    n_part_total  = _count(live_gaps, resp="Partial")
-    n_unans_total = _count(live_gaps, resp="—")
 
     st.subheader("Gap Summary Report")
     st.caption(
@@ -1483,40 +1474,22 @@ with tab_gap_summary:
         "Filter by tier or response to prioritise remediation."
     )
 
-    # ── KPI strip — tier breakdown ───────────────────────────────────────────────
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Total gaps",         total_gaps)
-    k2.metric("🔴 Critical",        n_crit_total)
-    k3.metric("🟠 High",            n_high_total)
-    k4.metric("🟡 Medium",          n_med_total)
-    k5.metric("🟢 Low / No tier",   n_low_total)
+    # ── Counts from full question set ───────────────────────────────────────────
+    total_questions_gs = len(p2_items)
+    n_yes_gs    = sum(1 for i in p2_items if i["norm"] == "Yes")
+    n_no_total  = sum(1 for i in p2_items if i["norm"] == "No")
+    n_part_total = sum(1 for i in p2_items if i["norm"] == "Partial")
+    n_na_total  = sum(1 for i in p2_items if i["norm"] == "N/A")
+    n_unans_total = sum(1 for i in p2_items if i["norm"] == "—")
 
-    # Response breakdown sub-row
-    r1, r2, r3, r4, _ = st.columns([1, 1, 1, 1, 1])
-    r1.markdown(
-        '<div style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;'
-        'letter-spacing:0.05em;margin-bottom:2px">No</div>'
-        f'<div style="font-size:22px;font-weight:600;color:#A32D2D">{n_no_total}</div>',
-        unsafe_allow_html=True,
-    )
-    r2.markdown(
-        '<div style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;'
-        'letter-spacing:0.05em;margin-bottom:2px">Partial</div>'
-        f'<div style="font-size:22px;font-weight:600;color:#854F0B">{n_part_total}</div>',
-        unsafe_allow_html=True,
-    )
-    r3.markdown(
-        '<div style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;'
-        'letter-spacing:0.05em;margin-bottom:2px">N/A</div>'
-        f'<div style="font-size:22px;font-weight:600;color:#5F5E5A">{n_na_total}</div>',
-        unsafe_allow_html=True,
-    )
-    r4.markdown(
-        '<div style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;'
-        'letter-spacing:0.05em;margin-bottom:2px">Unanswered</div>'
-        f'<div style="font-size:22px;font-weight:600;color:#888780">{n_unans_total}</div>',
-        unsafe_allow_html=True,
-    )
+    # ── KPI strip ────────────────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1.metric("Total questions", total_questions_gs)
+    k2.metric("✅ Yes",          n_yes_gs)
+    k3.metric("❌ No",           n_no_total)
+    k4.metric("⚠️ Partial",      n_part_total)
+    k5.metric("➖ N/A",          n_na_total)
+    k6.metric("⬜ Unanswered",   n_unans_total)
 
     st.divider()
 

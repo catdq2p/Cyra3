@@ -1484,6 +1484,91 @@ with tab_gap_summary:
 
     st.divider()
 
+    # ── Filters ──────────────────────────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        gs_tier_f = st.multiselect(
+            "Filter by risk tier",
+            options=["Critical", "High", "Medium", "Low", ""],
+            default=["Critical", "High", "Medium", "Low", ""],
+            format_func=lambda x: x if x else "No tier",
+            key="gs_tier_filter",
+        )
+    with fc2:
+        gs_resp_f = st.multiselect(
+            "Filter by response",
+            options=["No", "Partial", "N/A", "—"],
+            default=["No", "Partial", "N/A", "—"],
+            format_func=lambda x: "Unanswered" if x == "—" else x,
+            key="gs_resp_filter",
+        )
+    with fc3:
+        gs_dom_f = st.multiselect(
+            "Filter by domain",
+            options=sorted({i["domain_name"] for i in live_gaps}),
+            default=sorted({i["domain_name"] for i in live_gaps}),
+            key="gs_dom_filter",
+        )
+
+    filtered_gaps = [
+        i for i in live_gaps
+        if i["tier"] in gs_tier_f
+        and i["norm"] in gs_resp_f
+        and i["domain_name"] in gs_dom_f
+    ]
+    filtered_gaps.sort(key=lambda x: (TIER_ORDER.get(x["tier"], 4), x["domain"], x["key"]))
+
+    st.caption(f"Showing {len(filtered_gaps)} of {total_gaps} gaps")
+
+    # ── Export buttons ────────────────────────────────────────────────────────────
+    export_df = pd.DataFrame([{
+        "Key":        i["key"],
+        "Domain":     i["domain_name"],
+        "Question":   i["question"],
+        "Response":   i["norm"],
+        "Risk Tier":  i["tier"],
+        "Remarks":    i["other"],
+    } for i in filtered_gaps])
+
+    ex1, ex2, ex3 = st.columns([1, 1, 1])
+    with ex1:
+        st.download_button(
+            "⬇ Export gaps CSV",
+            data=export_df.to_csv(index=False).encode(),
+            file_name="tpcra_gap_summary.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with ex2:
+        buf2 = io.BytesIO()
+        with pd.ExcelWriter(buf2, engine="openpyxl") as writer:
+            export_df.to_excel(writer, index=False, sheet_name="Gap Summary")
+        st.download_button(
+            "⬇ Export gaps Excel",
+            data=buf2.getvalue(),
+            file_name="tpcra_gap_summary.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    with ex3:
+        pdf_bytes = generate_vendor_pdf(
+            live_gaps=filtered_gaps,
+            vendor_name=contact.get("vendor", ""),
+            assessment_date=datetime.date.today().strftime("%d %B %Y"),
+            total_questions=len(p2_items),
+            gap_db=GAP_DB,
+        )
+        st.download_button(
+            "⬇ Download vendor report PDF",
+            data=pdf_bytes,
+            file_name="tpcra_vendor_gap_report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+        )
+
+    st.divider()
+
     # ── Stacked bar chart — gaps by domain × tier ────────────────────────────────
     chart_rows = []
     for letter, dom in domains.items():
@@ -1524,43 +1609,6 @@ with tab_gap_summary:
         fig_gs.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.07)")
         st.plotly_chart(fig_gs, use_container_width=True)
 
-    st.divider()
-
-    # ── Filters ──────────────────────────────────────────────────────────────────
-    fc1, fc2, fc3 = st.columns(3)
-    with fc1:
-        gs_tier_f = st.multiselect(
-            "Filter by risk tier",
-            options=["Critical", "High", "Medium", "Low", ""],
-            default=["Critical", "High", "Medium", "Low", ""],
-            format_func=lambda x: x if x else "No tier",
-            key="gs_tier_filter",
-        )
-    with fc2:
-        gs_resp_f = st.multiselect(
-            "Filter by response",
-            options=["No", "Partial", "N/A", "—"],
-            default=["No", "Partial", "N/A", "—"],
-            format_func=lambda x: "Unanswered" if x == "—" else x,
-            key="gs_resp_filter",
-        )
-    with fc3:
-        gs_dom_f = st.multiselect(
-            "Filter by domain",
-            options=sorted({i["domain_name"] for i in live_gaps}),
-            default=sorted({i["domain_name"] for i in live_gaps}),
-            key="gs_dom_filter",
-        )
-
-    filtered_gaps = [
-        i for i in live_gaps
-        if i["tier"] in gs_tier_f
-        and i["norm"] in gs_resp_f
-        and i["domain_name"] in gs_dom_f
-    ]
-    filtered_gaps.sort(key=lambda x: (TIER_ORDER.get(x["tier"], 4), x["domain"], x["key"]))
-
-    st.caption(f"Showing {len(filtered_gaps)} of {total_gaps} gaps")
     st.divider()
 
     # ── Gaps grouped by domain ───────────────────────────────────────────────────
@@ -1662,55 +1710,6 @@ with tab_gap_summary:
                     )
 
         st.markdown('<div style="margin-bottom:8px"></div>', unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── Exports ──────────────────────────────────────────────────────────────────
-    export_df = pd.DataFrame([{
-        "Key":        i["key"],
-        "Domain":     i["domain_name"],
-        "Question":   i["question"],
-        "Response":   i["norm"],
-        "Risk Tier":  i["tier"],
-        "Remarks":    i["other"],
-    } for i in filtered_gaps])
-
-    ex1, ex2, ex3 = st.columns([1, 1, 1])
-    with ex1:
-        st.download_button(
-            "⬇ Export gaps CSV",
-            data=export_df.to_csv(index=False).encode(),
-            file_name="tpcra_gap_summary.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    with ex2:
-        buf2 = io.BytesIO()
-        with pd.ExcelWriter(buf2, engine="openpyxl") as writer:
-            export_df.to_excel(writer, index=False, sheet_name="Gap Summary")
-        st.download_button(
-            "⬇ Export gaps Excel",
-            data=buf2.getvalue(),
-            file_name="tpcra_gap_summary.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    with ex3:
-        pdf_bytes = generate_vendor_pdf(
-            live_gaps=filtered_gaps,
-            vendor_name=contact.get("vendor", ""),
-            assessment_date=datetime.date.today().strftime("%d %B %Y"),
-            total_questions=len(p2_items),
-            gap_db=GAP_DB,
-        )
-        st.download_button(
-            "⬇ Download vendor report PDF",
-            data=pdf_bytes,
-            file_name="tpcra_vendor_gap_report.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            type="primary",
-        )
 
 
 st.divider()

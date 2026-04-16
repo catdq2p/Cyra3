@@ -706,7 +706,7 @@ st.divider()
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tab_overview, tab_domain, tab_gaps, tab_evidence, tab_part1, tab_gap_summary = st.tabs([
-    "Overview", "By domain", "Gap analysis", "Evidence checklist", "Part 1 — Engagement", "Gap summary"
+    "Overview", "By domain", "Gap analysis", "Evidence checklist", "Engagement info", "Gap summary"
 ])
 
 # ══════════════════════════
@@ -1075,34 +1075,50 @@ with tab_part1:
         else:
             sections_to_show = p1_sections
 
+        HIDE_TIER_SECTIONS = {"SECTION 1 — CONTACT PERSON", "SECTION 2 — ENGAGEMENT INFORMATION"}
+
         for sec_name, sec_items in sections_to_show.items():
             if not sec_items:
                 continue
             st.subheader(sec_name.replace("SECTION ", "").replace(" — ", " — ").title()
                          if "SECTION" in sec_name else sec_name)
+
+            hide_tier = sec_name in HIDE_TIER_SECTIONS
+
             rows_html = ""
             for item in sec_items:
                 r = item["response"] or "—"
                 resp_preview = r if len(r) <= 100 else r[:97] + "…"
-                tier_badge = tier_pill(item["tier"]) if item.get("tier") else ""
+                tier_cell = (
+                    ""
+                    if hide_tier
+                    else '<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;width:10%;vertical-align:top">'
+                         + (tier_pill(item["tier"]) if item.get("tier") else "")
+                         + "</td>"
+                )
+                q_width  = "55%" if hide_tier else "48%"
+                resp_width = "38%" if hide_tier else "35%"
                 rows_html += (
                     "<tr>"
                     '<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:12px;color:#aaa;width:7%;vertical-align:top">' + item['key'] + "</td>"
-                    '<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#333;width:48%;vertical-align:top;line-height:1.5">' + item['question'] + "</td>"
-                    '<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#555;width:35%;vertical-align:top;line-height:1.5">' + resp_preview + "</td>"
-                    '<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;width:10%;vertical-align:top">' + tier_badge + "</td>"
+                    f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#333;width:{q_width};vertical-align:top;line-height:1.5">' + item['question'] + "</td>"
+                    f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#555;width:{resp_width};vertical-align:top;line-height:1.5">' + resp_preview + "</td>"
+                    + tier_cell +
                     "</tr>"
                 )
 
             TH2 = "padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:#6c757d;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #e9ecef"
+            tier_header = "" if hide_tier else f'<th style="{TH2};width:10%">Tier</th>'
+            q_width_h   = "55%" if hide_tier else "48%"
+            resp_width_h = "38%" if hide_tier else "35%"
             p1_table = (
                 '<div style="border:1px solid #e9ecef;border-radius:10px;overflow:hidden;margin-bottom:1.5rem">'
                 '<table style="width:100%;border-collapse:collapse;table-layout:fixed">'
                 '<thead><tr style="background:#f8f9fa">'
-                '<th style="' + TH2 + ';width:7%">#</th>'
-                '<th style="' + TH2 + ';width:48%">Question</th>'
-                '<th style="' + TH2 + ';width:35%">Response</th>'
-                '<th style="' + TH2 + ';width:10%">Tier</th>'
+                f'<th style="{TH2};width:7%">#</th>'
+                f'<th style="{TH2};width:{q_width_h}">Question</th>'
+                f'<th style="{TH2};width:{resp_width_h}">Response</th>'
+                + tier_header +
                 "</tr></thead>"
                 "<tbody>" + rows_html + "</tbody>"
                 "</table></div>"

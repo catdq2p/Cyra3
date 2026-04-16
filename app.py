@@ -1106,7 +1106,11 @@ with h1:
 with h2:
     st.caption(p2_data.get("title", "TPCRA v3.0"))
 
-st.divider()
+# ── Response counts (used by Overview tab charts) ──────────────────────────────
+n_yes  = sum(1 for i in p2_items if i["norm"] == "Yes")
+n_no   = sum(1 for i in p2_items if i["norm"] == "No")
+n_part = sum(1 for i in p2_items if i["norm"] == "Partial")
+n_na   = sum(1 for i in p2_items if i["norm"] == "N/A")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tab_overview, tab_domain, tab_evidence, tab_part1, tab_gap_summary = st.tabs([

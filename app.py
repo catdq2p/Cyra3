@@ -1572,40 +1572,38 @@ with tab_gap_summary:
     st.caption(f"Showing {len(filtered_gaps)} of {total_gaps} gaps")
     st.divider()
 
-    # ── Tier sections with gap cards ─────────────────────────────────────────────
+    # ── Gaps grouped by domain ───────────────────────────────────────────────────
     TH_GS = (
         "padding:8px 10px;text-align:left;font-size:11px;font-weight:600;color:#6c757d;"
         "text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #e9ecef"
     )
 
-    TIER_SECTION_LABEL = {
-        "Critical": "🔴  Critical controls",
-        "High":     "🟠  High controls",
-        "Medium":   "🟡  Medium controls",
-        "Low":      "🟢  Low controls",
-        "":         "⬜  Controls without tier",
-    }
+    # Preserve domain order from DOMAIN_MAP
+    domain_order = list(DOMAIN_MAP.keys())
+    active_domain_letters = sorted(
+        {i["domain"] for i in filtered_gaps},
+        key=lambda x: domain_order.index(x) if x in domain_order else 99,
+    )
 
-    for tier_key in ["Critical", "High", "Medium", "Low", ""]:
-        if tier_key not in gs_tier_f:
-            continue
-        tier_items = [i for i in filtered_gaps if i["tier"] == tier_key]
-        if not tier_items:
-            continue
+    for dom_letter in active_domain_letters:
+        dom_items = [i for i in filtered_gaps if i["domain"] == dom_letter]
+        dom_name  = DOMAIN_MAP.get(dom_letter, dom_letter)
 
-        # Tier section header
-        n_no   = sum(1 for i in tier_items if i["norm"] == "No")
-        n_pa   = sum(1 for i in tier_items if i["norm"] == "Partial")
-        n_na   = sum(1 for i in tier_items if i["norm"] == "N/A")
-        n_un   = sum(1 for i in tier_items if i["norm"] == "—")
-        badge  = GS_RISK_BADGE.get(tier_key, GS_RISK_BADGE.get("Low", ""))
-        label  = TIER_SECTION_LABEL.get(tier_key, tier_key)
+        # Sort within domain: Critical → High → Medium → Low → no tier, then by key
+        dom_items.sort(key=lambda x: (TIER_ORDER.get(x["tier"], 4), x["key"]))
 
+        n_no  = sum(1 for i in dom_items if i["norm"] == "No")
+        n_pa  = sum(1 for i in dom_items if i["norm"] == "Partial")
+        n_na  = sum(1 for i in dom_items if i["norm"] == "N/A")
+        n_un  = sum(1 for i in dom_items if i["norm"] == "—")
+
+        # Domain header
         st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;margin:8px 0 6px">'
-            f'<span style="font-size:14px;font-weight:600;color:#333">{label}</span>'
+            f'<div style="display:flex;align-items:center;gap:10px;margin:12px 0 5px">'
+            f'<span style="font-size:14px;font-weight:600;color:#333">'
+            f'{dom_letter} — {dom_name}</span>'
             f'<span style="font-size:12px;color:#6c757d">'
-            f'&nbsp;{len(tier_items)} gap{"s" if len(tier_items)!=1 else ""}'
+            f'{len(dom_items)} gap{"s" if len(dom_items)!=1 else ""}'
             f'&nbsp;&nbsp;·&nbsp;&nbsp;No: <b>{n_no}</b>'
             f'&nbsp;&nbsp;Partial: <b>{n_pa}</b>'
             f'&nbsp;&nbsp;N/A: <b>{n_na}</b>'
@@ -1614,77 +1612,65 @@ with tab_gap_summary:
             unsafe_allow_html=True,
         )
 
-        # Table of gap items for this tier
+        # Gap table for this domain (no Domain column — redundant now)
         rows_html = ""
-        for item in tier_items:
-            resp_badge_html = f'<span style="{GS_RESP_BADGE.get(item["norm"], GS_RESP_BADGE["—"])}">{item["norm"] if item["norm"] != "—" else "Unanswered"}</span>'
+        for item in dom_items:
+            resp_badge_html = (
+                f'<span style="{GS_RESP_BADGE.get(item["norm"], GS_RESP_BADGE["—"])}">'
+                f'{item["norm"] if item["norm"] != "—" else "Unanswered"}</span>'
+            )
+            tier_badge_html = (
+                f'<span style="{GS_RISK_BADGE.get(item["tier"], GS_RISK_BADGE.get("Low", ""))}">'
+                f'{item["tier"] if item["tier"] else "—"}</span>'
+            )
             remarks_cell = (
-                f'<div style="font-size:11px;color:#777;margin-top:4px;line-height:1.4">{item["other"]}</div>'
+                f'<div style="font-size:11px;color:#777;margin-top:4px;line-height:1.4">'
+                f'{item["other"]}</div>'
                 if item["other"] else ""
             )
             rows_html += (
                 "<tr>"
                 f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;font-size:11px;'
-                f'color:#aaa;width:7%;vertical-align:top;white-space:nowrap">{item["key"]}</td>'
-                f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;font-size:12px;'
-                f'color:#888;width:18%;vertical-align:top">{item["domain_name"]}</td>'
+                f'color:#aaa;width:8%;vertical-align:top;white-space:nowrap">{item["key"]}</td>'
                 f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;'
-                f'color:#333;line-height:1.5;width:55%;vertical-align:top">'
+                f'color:#333;line-height:1.5;width:67%;vertical-align:top">'
                 f'{item["question"]}{remarks_cell}</td>'
-                f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;width:10%;'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;width:12%;'
                 f'vertical-align:top;text-align:center">{resp_badge_html}</td>'
-                f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;width:10%;'
-                f'vertical-align:top;text-align:center">'
-                f'<span style="{GS_RISK_BADGE.get(item["tier"], GS_RISK_BADGE.get("Low",""))}">'
-                f'{item["tier"] if item["tier"] else "—"}</span></td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #f0f0f0;width:13%;'
+                f'vertical-align:top;text-align:center">{tier_badge_html}</td>'
                 "</tr>"
             )
 
-        tier_table_html = (
-            '<div style="border:1px solid #e9ecef;border-radius:10px;overflow:hidden;margin-bottom:1.25rem">'
+        st.markdown(
+            '<div style="border:1px solid #e9ecef;border-radius:10px;overflow:hidden;margin-bottom:6px">'
             '<table style="width:100%;border-collapse:collapse;table-layout:fixed">'
             '<thead><tr style="background:#f8f9fa">'
-            f'<th style="{TH_GS};width:7%">Ref</th>'
-            f'<th style="{TH_GS};width:18%">Domain</th>'
-            f'<th style="{TH_GS};width:55%">Control / Question</th>'
-            f'<th style="{TH_GS};width:10%;text-align:center">Response</th>'
-            f'<th style="{TH_GS};width:10%;text-align:center">Tier</th>'
+            f'<th style="{TH_GS};width:8%">Ref</th>'
+            f'<th style="{TH_GS};width:67%">Control / Question</th>'
+            f'<th style="{TH_GS};width:12%;text-align:center">Response</th>'
+            f'<th style="{TH_GS};width:13%;text-align:center">Tier</th>'
             "</tr></thead>"
             f"<tbody>{rows_html}</tbody>"
-            "</table></div>"
+            "</table></div>",
+            unsafe_allow_html=True,
         )
-        st.markdown(tier_table_html, unsafe_allow_html=True)
 
-    st.divider()
+        # Per-domain recommendations
+        dom_meta = next((d for d in GAP_DB if d["id"] == dom_letter), None)
+        if dom_meta and dom_meta.get("recs"):
+            with st.expander(f"Recommendations for {dom_letter} — {dom_name}", expanded=False):
+                for idx, rec in enumerate(dom_meta["recs"], 1):
+                    st.markdown(
+                        f'<div style="padding:7px 12px;border-radius:7px;background:#f8f9fa;'
+                        f'border-left:3px solid #185FA5;margin-bottom:5px;font-size:12px;'
+                        f'color:#333;line-height:1.55">'
+                        f'<span style="font-weight:600;color:#185FA5;margin-right:6px">{idx}.</span>{rec}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
-    # ── Domain-level recommendations (from GAP_DB) ───────────────────────────────
-    active_domains = sorted({i["domain"] for i in filtered_gaps})
-    if active_domains:
-        st.markdown("**Recommendations by domain**")
-        st.caption("Based on gaps in the filtered view above.")
-        for dom_letter in active_domains:
-            dom_meta = next((d for d in GAP_DB if d["id"] == dom_letter), None)
-            if not dom_meta or not dom_meta.get("recs"):
-                continue
-            dom_gaps_count = sum(1 for i in filtered_gaps if i["domain"] == dom_letter)
-            badge_html = f'<span style="{GS_RISK_BADGE.get(dom_meta["risk"], "")}">{dom_meta["risk"]}</span>'
-            st.markdown(
-                f'<div style="display:flex;align-items:center;gap:8px;margin:10px 0 4px">'
-                f'<span style="font-size:13px;font-weight:600;color:#333">'
-                f'{dom_letter} — {dom_meta["name"]}</span>'
-                f'{badge_html}'
-                f'<span style="font-size:12px;color:#aaa">{dom_gaps_count} gap{"s" if dom_gaps_count!=1 else ""}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            for i, rec in enumerate(dom_meta["recs"], 1):
-                st.markdown(
-                    f'<div style="padding:8px 13px;border-radius:8px;background:#f8f9fa;'
-                    f'border-left:3px solid #185FA5;margin-bottom:5px;font-size:12px;'
-                    f'color:#333;line-height:1.55">'
-                    f'<span style="font-weight:600;color:#185FA5;margin-right:6px">{i}.</span>{rec}</div>',
-                    unsafe_allow_html=True,
-                )
+        st.markdown('<div style="margin-bottom:8px"></div>', unsafe_allow_html=True)
 
     st.divider()
 

@@ -1083,7 +1083,9 @@ After searching, respond ONLY with a JSON object in this exact format (no markdo
 
 If no incidents are found after thorough searching, set no_incidents_found to true, incidents to [], risk_level to "Low", and say so clearly in the summary."""
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(
+        api_key=st.secrets.get("ANTHROPIC_API_KEY", None)
+    )
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2000,

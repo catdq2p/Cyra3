@@ -1070,7 +1070,7 @@ if not uploaded:
     c2.info("**Gap List**\nAll No / N/A / Partial / unanswered controls grouped by domain, with recommendations and PDF export.")
     c3.info("**Evidence Checklist**\nEvidence submission status against the 14 required evidence items from the TPCRA v3.0 checklist.")
     c4, c5, c6 = st.columns(3)
-    c4.info("**Engagement Info**\nVendor contact details, engagement description, data handling, and transmission methods from Part 1.")
+    c4.info("**Engagement Info**\nVendor contact details, engagement description, data handling, and transmission methods from the questionnaire.")
     c5.markdown("")
     c6.markdown("")
     st.stop()

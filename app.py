@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import io
 import datetime
+import anthropic
 from openpyxl import load_workbook
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -1039,6 +1040,87 @@ def generate_vendor_pdf(
     doc.build(story)
     return buf.getvalue()
 
+
+# ── Breach intelligence search ─────────────────────────────────────────────────
+def search_vendor_breaches(vendor_name: str) -> dict:
+    """
+    Use the Anthropic API with web_search to find data breach or security
+    incident intelligence for the given vendor.
+    """
+    import json, re
+    today = datetime.date.today().strftime("%d %B %Y")
+    prompt = f"""You are a cybersecurity threat intelligence analyst conducting a third-party vendor risk assessment.
+
+Search the internet comprehensively for any data breaches, security incidents, cyberattacks, ransomware attacks, data leaks, regulatory fines, or security vulnerabilities publicly reported for the company: \"{vendor_name}\".
+
+Search for:
+1. Known data breaches or leaks involving \"{vendor_name}\"
+2. Cybersecurity incidents, ransomware, or malware attacks on \"{vendor_name}\"
+3. Regulatory penalties or enforcement actions related to security/data privacy for \"{vendor_name}\"
+4. Reported vulnerabilities in \"{vendor_name}\" products or services
+5. Any recent (last 3 years) security news about \"{vendor_name}\"
+
+Today's date is {today}.
+
+After searching, respond ONLY with a JSON object in this exact format (no markdown, no extra text):
+{{
+  "summary": "2-3 sentence executive summary of findings",
+  "risk_level": "Low|Medium|High|Critical",
+  "risk_rationale": "1 sentence explaining the risk level",
+  "incidents": [
+    {{
+      "date": "YYYY or YYYY-MM or YYYY-MM-DD",
+      "title": "Short incident title",
+      "description": "Brief description of the incident",
+      "type": "Data Breach|Ransomware|Regulatory Fine|Vulnerability|Security Incident|Other",
+      "severity": "Low|Medium|High|Critical",
+      "source": "Publication name or URL"
+    }}
+  ],
+  "no_incidents_found": true,
+  "searched_at": "{today}"
+}}
+
+If no incidents are found after thorough searching, set no_incidents_found to true, incidents to [], risk_level to "Low", and say so clearly in the summary."""
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw_text = ""
+    for block in response.content:
+        if hasattr(block, "text"):
+            raw_text += block.text
+
+    clean = re.sub(r"```(?:json)?|```", "", raw_text).strip()
+    try:
+        result = json.loads(clean)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{[\s\S]*\}", clean)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+            except Exception:
+                result = None
+        else:
+            result = None
+
+    if not result:
+        result = {
+            "summary": raw_text[:600] if raw_text else "Search completed but response could not be parsed.",
+            "risk_level": "Unknown",
+            "risk_rationale": "Structured response unavailable.",
+            "incidents": [],
+            "no_incidents_found": True,
+            "searched_at": today,
+        }
+    return result
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN APP
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1062,7 +1144,7 @@ with st.sidebar:
 
 # ── Empty state ────────────────────────────────────────────────────────────────
 if not uploaded:
-    st.title("🔐 Third Party Risk Assessment Dashboard")
+    st.title("🔐 TPCRA v3.0 Risk Assessment Dashboard")
     st.markdown("Upload a completed TPCRA v3.0 questionnaire from the sidebar to generate the dashboard.")
     st.divider()
     c1, c2, c3 = st.columns(3)
@@ -1070,8 +1152,8 @@ if not uploaded:
     c2.info("**Gap List**\nAll No / N/A / Partial / unanswered controls grouped by domain, with recommendations and PDF export.")
     c3.info("**Evidence Checklist**\nEvidence submission status against the 14 required evidence items from the TPCRA v3.0 checklist.")
     c4, c5, c6 = st.columns(3)
-    c4.info("**Engagement Info**\nVendor contact details, engagement description, data handling, and transmission methods from the questionnaire.")
-    c5.markdown("")
+    c4.info("**Engagement Info**\nVendor contact details, engagement description, data handling, and transmission methods from Part 1.")
+    c5.info("**Breach Intelligence**\nSearches the internet for publicly reported data breaches, cyberattacks, and security incidents involving the vendor.")
     c6.markdown("")
     st.stop()
 
@@ -1128,8 +1210,8 @@ n_part = sum(1 for i in p2_items if i["norm"] == "Partial")
 n_na   = sum(1 for i in p2_items if i["norm"] == "N/A")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_part1, tab_overview, tab_gap_summary, tab_evidence = st.tabs([
-    "Engagement Info", "Overview", "Gap List", "Evidence Checklist"
+tab_part1, tab_overview, tab_gap_summary, tab_evidence, tab_breach = st.tabs([
+    "Engagement Info", "Overview", "Gap List", "Evidence Checklist", "Breach Intelligence"
 ])
 
 # ══════════════════════════════════════════════
@@ -1709,5 +1791,178 @@ with tab_gap_summary:
         st.markdown('<div style="margin-bottom:8px"></div>', unsafe_allow_html=True)
 
 
+# ══════════════════════════════
+# TAB 5 — BREACH INTELLIGENCE
+# ══════════════════════════════
+with tab_breach:
+    RISK_LEVEL_STYLE = {
+        "Critical": ("background:#FCEBEB;color:#791F1F", "#A32D2D"),
+        "High":     ("background:#FAEEDA;color:#633806", "#854F0B"),
+        "Medium":   ("background:#E6F1FB;color:#0C447C", "#185FA5"),
+        "Low":      ("background:#EAF3DE;color:#27500A", "#3B6D11"),
+        "Unknown":  ("background:#F1EFE8;color:#5F5E5A", "#5F5E5A"),
+    }
+    SEV_STYLE = {
+        "Critical": "background:#FCEBEB;color:#791F1F",
+        "High":     "background:#FAEEDA;color:#633806",
+        "Medium":   "background:#E6F1FB;color:#0C447C",
+        "Low":      "background:#EAF3DE;color:#27500A",
+    }
+    TYPE_STYLE = {
+        "Data Breach":       "background:#FCEBEB;color:#791F1F",
+        "Ransomware":        "background:#FAEEDA;color:#633806",
+        "Regulatory Fine":   "background:#E6F1FB;color:#0C447C",
+        "Vulnerability":     "background:#FAEEDA;color:#633806",
+        "Security Incident": "background:#F1EFE8;color:#5F5E5A",
+        "Other":             "background:#F1EFE8;color:#5F5E5A",
+    }
+
+    vendor_to_search = contact.get("vendor", "").strip()
+
+    st.subheader("Breach & Security Intelligence")
+    st.caption(
+        "Searches the internet for publicly reported data breaches, cyberattacks, regulatory fines, "
+        "and security incidents involving the assessed vendor. Results are for risk assessment purposes only."
+    )
+
+    if not vendor_to_search:
+        st.warning(
+            "No vendor name found. Please ensure the Company Name (question 1.1) is completed "
+            "in the uploaded questionnaire before running a breach search."
+        )
+    else:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem">'
+            f'<span style="font-size:14px;color:#333">Vendor:</span>'
+            f'<span style="font-size:15px;font-weight:600;color:#333">{vendor_to_search}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Session state key per vendor so results persist across rerenders
+        cache_key = f"breach_results_{vendor_to_search.lower().replace(' ', '_')}"
+
+        col_btn, col_status = st.columns([2, 5])
+        with col_btn:
+            run_search = st.button(
+                "Search for breaches",
+                key="breach_search_btn",
+                use_container_width=True,
+                type="primary",
+            )
+        with col_status:
+            if cache_key in st.session_state:
+                last = st.session_state[cache_key].get("searched_at", "")
+                st.caption(f"Last searched: {last}  ·  Click 'Search for breaches' to refresh.")
+
+        if run_search:
+            with st.spinner(f"Searching the internet for breach intelligence on '{vendor_to_search}'..."):
+                try:
+                    result = search_vendor_breaches(vendor_to_search)
+                    st.session_state[cache_key] = result
+                except Exception as e:
+                    st.error(f"Search failed: {e}")
+                    result = None
+        else:
+            result = st.session_state.get(cache_key)
+
+        if result:
+            risk_level = result.get("risk_level", "Unknown")
+            pill_style, risk_color = RISK_LEVEL_STYLE.get(risk_level, RISK_LEVEL_STYLE["Unknown"])
+
+            # ── Risk level banner ──────────────────────────────────────────────
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;'
+                f'border-radius:10px;background:#f8f9fa;border:0.5px solid #e9ecef;margin-bottom:1rem">'
+                f'<div style="flex:1">'
+                f'<div style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;'
+                f'letter-spacing:0.05em;margin-bottom:4px">Breach risk level</div>'
+                f'<span style="{pill_style};padding:3px 12px;border-radius:20px;font-size:13px;'
+                f'font-weight:600;display:inline-block">{risk_level}</span>'
+                f'</div>'
+                f'<div style="flex:3;font-size:13px;color:#555;line-height:1.5">'
+                f'<b>Summary:</b> {result.get("summary","")}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            incidents = result.get("incidents", [])
+
+            if result.get("no_incidents_found") or not incidents:
+                st.success(
+                    f"No publicly reported data breaches or security incidents found for '{vendor_to_search}'. "
+                    "This does not guarantee a clean record — some incidents may not be publicly disclosed."
+                )
+            else:
+                st.markdown(
+                    f'<div style="font-size:13px;font-weight:600;color:#333;margin-bottom:8px">'
+                    f'{len(incidents)} incident{"s" if len(incidents)!=1 else ""} found</div>',
+                    unsafe_allow_html=True,
+                )
+
+                TH_B = (
+                    "padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:#6c757d;"
+                    "text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #e9ecef"
+                )
+                rows_html = ""
+                for inc in incidents:
+                    sev   = inc.get("severity", "")
+                    itype = inc.get("type", "Other")
+                    sev_style  = SEV_STYLE.get(sev, "background:#F1EFE8;color:#5F5E5A")
+                    type_style = TYPE_STYLE.get(itype, TYPE_STYLE["Other"])
+                    rows_html += (
+                        "<tr>"
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:12px;'
+                        f'color:#6c757d;width:9%;vertical-align:top;white-space:nowrap">'
+                        f'{inc.get("date","—")}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;'
+                        f'font-weight:600;color:#333;width:24%;vertical-align:top">'
+                        f'{inc.get("title","")}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:12px;'
+                        f'color:#555;width:35%;vertical-align:top;line-height:1.5">'
+                        f'{inc.get("description","")}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;width:12%;'
+                        f'vertical-align:top;text-align:center">'
+                        f'<span style="{type_style};padding:2px 8px;border-radius:20px;font-size:11px;'
+                        f'font-weight:600">{itype}</span></td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;width:9%;'
+                        f'vertical-align:top;text-align:center">'
+                        f'<span style="{sev_style};padding:2px 8px;border-radius:20px;font-size:11px;'
+                        f'font-weight:600">{sev}</span></td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #f0f0f0;font-size:11px;'
+                        f'color:#6c757d;width:11%;vertical-align:top">{inc.get("source","")}</td>'
+                        "</tr>"
+                    )
+
+                st.markdown(
+                    '<div style="border:1px solid #e9ecef;border-radius:10px;overflow:hidden">'
+                    '<table style="width:100%;border-collapse:collapse;table-layout:fixed">'
+                    '<thead><tr style="background:#f8f9fa">'
+                    f'<th style="{TH_B};width:9%">Date</th>'
+                    f'<th style="{TH_B};width:24%">Incident</th>'
+                    f'<th style="{TH_B};width:35%">Description</th>'
+                    f'<th style="{TH_B};width:12%;text-align:center">Type</th>'
+                    f'<th style="{TH_B};width:9%;text-align:center">Severity</th>'
+                    f'<th style="{TH_B};width:11%">Source</th>'
+                    "</tr></thead>"
+                    f"<tbody>{rows_html}</tbody>"
+                    "</table></div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── Disclaimer ─────────────────────────────────────────────────────
+            st.markdown(
+                '<div style="margin-top:1rem;padding:10px 14px;border-radius:8px;'
+                'background:#f8f9fa;border-left:3px solid #e9ecef;font-size:12px;'
+                'color:#6c757d;line-height:1.6">'
+                '<b>Disclaimer:</b> Results are sourced from publicly available internet information. '
+                'This search may not capture all incidents — some breaches are not publicly disclosed. '
+                'Results should be treated as supplementary intelligence and validated with the vendor '
+                'directly as part of due diligence. Confidential — for internal use only.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+
 st.divider()
-st.caption("Third-Party Cyber Risk Assessment Dashboard  ·  For internal use only")
+st.caption("TPCRA v3.0 — Third-Party Cyber Risk Assessment Dashboard  ·  For internal use only")

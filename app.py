@@ -1062,7 +1062,7 @@ with st.sidebar:
 
 # ── Empty state ────────────────────────────────────────────────────────────────
 if not uploaded:
-    st.title("🔐 TPCRA v3.0 Risk Assessment Dashboard")
+    st.title("🔐 Third Party Risk Assessment Dashboard")
     st.markdown("Upload a completed TPCRA v3.0 questionnaire from the sidebar to generate the dashboard.")
     st.divider()
     c1, c2, c3 = st.columns(3)
@@ -1710,4 +1710,4 @@ with tab_gap_summary:
 
 
 st.divider()
-st.caption("TPCRA v3.0 — Third-Party Cyber Risk Assessment Dashboard  ·  For internal use only")
+st.caption("Third-Party Cyber Risk Assessment Dashboard  ·  For internal use only")
